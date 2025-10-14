@@ -1,0 +1,221 @@
+package com.arval.blm.core.application.service
+
+import com.arval.blm.core.domain.model.*
+import com.arval.blm.core.domain.spi.*
+import io.mockk.*
+import kotlin.test.*
+import java.time.*
+
+class ImportCustomersServiceTest {
+
+    private lateinit var service: ImportCustomersService
+    private lateinit var recordStepEventRepositorySpi: RecordStepEventRepositorySpi
+    private lateinit var clockProvider: ClockProvider
+    private lateinit var referenceIdFactory: ReferenceIdFactory
+    private lateinit var crmClsCustomerDataRepositorySpi: CrmClsCustomerDataRepositorySpi
+    private lateinit var crmCustomerProviderSpi: CrmCustomerProviderSpi
+    private lateinit var batchRepositorySpi: BatchRepositoryForContactsSpi
+
+    @BeforeTest
+    fun setup() {
+        recordStepEventRepositorySpi = mockk(relaxed = true)
+        clockProvider = mockk { every { now() } returns Instant.now() }
+        referenceIdFactory = mockk(relaxed = true)
+        crmClsCustomerDataRepositorySpi = mockk(relaxed = true)
+        crmCustomerProviderSpi = mockk(relaxed = true)
+        batchRepositorySpi = mockk(relaxed = true)
+
+        service = ImportCustomersService(
+            recordStepEventRepositorySpi = recordStepEventRepositorySpi,
+            clockProvider = clockProvider,
+            referenceIdFactory = referenceIdFactory,
+            crmClsCustomerDataRepositorySpi = crmClsCustomerDataRepositorySpi,
+            crmCustomerProviderSpi = crmCustomerProviderSpi,
+            batchRepositorySpi = batchRepositorySpi
+        )
+    }
+
+    // --------------------------------------------------------------------------
+    // TEST 1 : processCustomerSavingInBlmStep
+    // --------------------------------------------------------------------------
+    @Test
+    fun `processCustomerSavingInBlmStep should save customer and record OK event`() {
+        // GIVEN
+        val crmClsCustomerData = CrmClsCustomerData(
+            id = "CUST_001",
+            batchId = "BATCH_1",
+            reconciliationId = ReconciliationId.parse("REF1234567-ROW1234567"),
+            rowNumber = 1,
+            rowReference = ReferenceId("ROW1234567"),
+            crmData = CrmData(),
+            clsData = emptyMap(),
+            crmInsertedId = "CRM_001"
+        )
+
+        val slotEvent = slot<RecordStepEvent>()
+        every { recordStepEventRepositorySpi.save(capture(slotEvent)) } answers { firstArg() }
+        every { crmClsCustomerDataRepositorySpi.save(any()) } answers { firstArg() }
+
+        // WHEN
+        val result = service.run {
+            val method = this::class.java.getDeclaredMethod(
+                "processCustomerSavingInBlmStep", CrmClsCustomerData::class.java
+            )
+            method.isAccessible = true
+            method.invoke(this, crmClsCustomerData) as CrmClsCustomerData
+        }
+
+        // THEN
+        assertEquals(crmClsCustomerData, result)
+        assertTrue(slotEvent.isCaptured)
+        val savedEvent = slotEvent.captured
+        assertEquals("BATCH_1", savedEvent.batchId)
+        assertEquals(1, savedEvent.rowNumber)
+        assertEquals(RecordStepStatus.OK, savedEvent.stepStatus)
+        assertEquals(RecordStepName.BLM, savedEvent.stepName)
+    }
+
+    // --------------------------------------------------------------------------
+    // TEST 2 : processCustomerCreationInCrmStep
+    // --------------------------------------------------------------------------
+    @Test
+    fun `processCustomerCreationInCrmStep should call CRM provider with correct data`() {
+        // GIVEN
+        val crmClsCustomerData = CrmClsCustomerData(
+            id = "CUST_002",
+            batchId = "BATCH_2",
+            reconciliationId = ReconciliationId.parse("REF0001111-ROW0001111"),
+            rowNumber = 2,
+            rowReference = ReferenceId("ROW0001111"),
+            crmData = CrmData(),
+            clsData = emptyMap(),
+            crmInsertedId = "CRM_002"
+        )
+
+        every { crmCustomerProviderSpi.createCrmCustomer(any()) } returns
+            CrmCustomerResponsePayload(
+                crmStatus = RecordStepStatus.OK,
+                crmMessage = "Created",
+                crmAccountId = "ACC_123",
+                crmRoleId = null
+            )
+
+        // WHEN
+        service.run {
+            val method = this::class.java.getDeclaredMethod(
+                "processCustomerCreationInCrmStep", CrmClsCustomerData::class.java
+            )
+            method.isAccessible = true
+            method.invoke(this, crmClsCustomerData)
+        }
+
+        // THEN
+        verify(exactly = 1) { crmCustomerProviderSpi.createCrmCustomer(crmClsCustomerData) }
+    }
+
+    // --------------------------------------------------------------------------
+    // TEST 3 : processCustomerUpdateInCrmStep
+    // --------------------------------------------------------------------------
+    @Test
+    fun `processCustomerUpdateInCrmStep should call update customer on CRM provider`() {
+        // GIVEN
+        val crmClsCustomerData = CrmClsCustomerData(
+            id = "CUST_003",
+            batchId = "BATCH_3",
+            reconciliationId = ReconciliationId.parse("REF2223333-ROW2223333"),
+            rowNumber = 3,
+            rowReference = ReferenceId("ROW2223333"),
+            crmData = CrmData(),
+            clsData = emptyMap(),
+            crmInsertedId = "CRM_003"
+        )
+
+        every { crmCustomerProviderSpi.updateCrmCustomer(any()) } returns
+            CrmCustomerResponsePayload(
+                crmStatus = RecordStepStatus.OK,
+                crmMessage = "Updated successfully",
+                crmAccountId = "ACC_789",
+                crmRoleId = null
+            )
+
+        // WHEN
+        service.run {
+            val method = this::class.java.getDeclaredMethod(
+                "processCustomerUpdateInCrmStep", CrmClsCustomerData::class.java
+            )
+            method.isAccessible = true
+            method.invoke(this, crmClsCustomerData)
+        }
+
+        // THEN
+        verify(exactly = 1) { crmCustomerProviderSpi.updateCrmCustomer(crmClsCustomerData) }
+    }
+
+    // --------------------------------------------------------------------------
+    // TEST 4 : processRoleCreationInCrmStep
+    // --------------------------------------------------------------------------
+    @Test
+    fun `processRoleCreationInCrmStep should call createRole on CRM provider`() {
+        // GIVEN
+        val crmRoleData = CrmRoleData(
+            reconciliationId = ReconciliationId.parse("REF9998888-ROW9998888"),
+            batchId = "BATCH_4",
+            rowNumber = 4,
+            crmCustomerData = CrmCustomerData(salesforceAccountId = "ACC_456"),
+            crmContactData = CrmContactData()
+        )
+
+        every { crmCustomerProviderSpi.createCrmRole(any()) } returns
+            CrmRoleResponsePayload(
+                crmStatus = RecordStepStatus.OK,
+                crmMessage = "Role created",
+                crmRoleId = "ROLE_001"
+            )
+
+        // WHEN
+        service.run {
+            val method = this::class.java.getDeclaredMethod(
+                "processRoleCreationInCrmStep", CrmRoleData::class.java
+            )
+            method.isAccessible = true
+            method.invoke(this, crmRoleData)
+        }
+
+        // THEN
+        verify(exactly = 1) { crmCustomerProviderSpi.createCrmRole(crmRoleData) }
+    }
+
+    // --------------------------------------------------------------------------
+    // TEST 5 : processRoleUpdateInCrmStep
+    // --------------------------------------------------------------------------
+    @Test
+    fun `processRoleUpdateInCrmStep should call updateRole on CRM provider`() {
+        // GIVEN
+        val crmRoleData = CrmRoleData(
+            reconciliationId = ReconciliationId.parse("REF1110000-ROW1110000"),
+            batchId = "BATCH_5",
+            rowNumber = 5,
+            crmCustomerData = CrmCustomerData(salesforceAccountId = "ACC_123"),
+            crmContactData = CrmContactData()
+        )
+
+        every { crmCustomerProviderSpi.updateCrmRole(any()) } returns
+            CrmRoleResponsePayload(
+                crmStatus = RecordStepStatus.OK,
+                crmMessage = "Role updated",
+                crmRoleId = "ROLE_002"
+            )
+
+        // WHEN
+        service.run {
+            val method = this::class.java.getDeclaredMethod(
+                "processRoleUpdateInCrmStep", CrmRoleData::class.java
+            )
+            method.isAccessible = true
+            method.invoke(this, crmRoleData)
+        }
+
+        // THEN
+        verify(exactly = 1) { crmCustomerProviderSpi.updateCrmRole(crmRoleData) }
+    }
+}
