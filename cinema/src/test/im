@@ -1,0 +1,81 @@
+package com.arval.blm.core.application.service
+
+import com.arval.blm.core.domain.model.*
+import com.arval.blm.core.domain.model.batch.LoaderBatchStatus
+import com.arval.blm.core.domain.spi.*
+import io.mockk.*
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import java.time.Instant
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+class ImportCustomersServiceTest {
+
+    private val recordStepEventRepositorySpi: RecordStepEventRepositorySpi = mockk(relaxed = true)
+    private val clockProvider: ClockProvider = mockk()
+    private val referenceIdFactory: ReferenceIdFactory = mockk()
+    private val crmClsCustomerDataRepositorySpi: CrmClsCustomerDataRepositorySpi = mockk(relaxed = true)
+    private val crmCustomerProviderSpi: CrmCustomerProviderSpi = mockk(relaxed = true)
+    private val batchRepositorySpi: BatchRepositoryForContactsSpi = mockk(relaxed = true)
+
+    private lateinit var sut: ImportCustomersService
+
+    @BeforeEach
+    fun setUp() {
+        every { clockProvider.now() } returns Instant.parse("2025-10-14T00:00:00Z")
+        every { referenceIdFactory.generate() } returns ReferenceId("0123456789")
+        every { crmClsCustomerDataRepositorySpi.save(any()) } answers { firstArg() }
+        every { batchRepositorySpi.save(any()) } answers { firstArg() }
+        every { recordStepEventRepositorySpi.save(any()) } answers { firstArg() }
+
+        sut = ImportCustomersService(
+            recordStepEventRepositorySpi = recordStepEventRepositorySpi,
+            clockProvider = clockProvider,
+            referenceIdFactory = referenceIdFactory,
+            crmCLsCustomerDataRepositorySpi = crmClsCustomerDataRepositorySpi,
+            crmCustomerProviderSpi = crmCustomerProviderSpi,
+            batchRepositorySpi = batchRepositorySpi
+        )
+    }
+
+    @Test
+    fun `apply should record KO event when personalAccount has an error message`() {
+        // GIVEN
+        val batch = LoaderBatch(
+            id = "BATCH_1",
+            reference = ReferenceId("REF0000001"),
+            fileName = "f.csv",
+            triggeredBy = "user1",
+            countryCode = CountryCode("FR"),
+            status = LoaderBatchStatus.RUNNING,
+            type = LoaderBatchType.CONTACTS,
+            startDate = Instant.now(),
+            endDate = null,
+            totalContacts = 1
+        )
+
+        val faultyCustomer = CustomerPayload(
+            rowNumber = 5,
+            crmData = CrmData(),
+            clsData = emptyMap(),
+            errorMessage = "SOME ERROR"
+        )
+
+        val slotEvent = slot<RecordStepEvent>()
+        every { recordStepEventRepositorySpi.save(capture(slotEvent)) } answers { firstArg() }
+
+        // WHEN
+        sut.apply(batch, listOf(faultyCustomer))
+
+        // THEN
+        assertTrue(slotEvent.isCaptured, "Expected a RecordStepEvent to be saved")
+        val savedEvent = slotEvent.captured
+
+        assertEquals(batch.id, savedEvent.batchId)
+        assertEquals(5, savedEvent.rowNumber)
+        assertEquals(RecordStepStatus.KO, savedEvent.stepStatus)
+        assertEquals(RecordStepName.BLM, savedEvent.stepName)
+        assertEquals("SOME ERROR", savedEvent.stepMessage)
+    }
+}
