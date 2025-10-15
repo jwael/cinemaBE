@@ -1,0 +1,60 @@
+import kotlin.reflect.full.declaredFunctions
+import kotlin.reflect.jvm.isAccessible
+import kotlin.test.*
+
+class ImportCustomersServiceTest {
+
+    // Tes mocks habituels
+    private val recordStepEventRepositorySpi: RecordStepEventRepositorySpi = mockk(relaxed = true)
+    private val clockProvider: ClockProvider = mockk()
+    private val referenceIdFactory: ReferenceIdFactory = mockk()
+    private val crmClsCustomerDataRepositorySpi: CrmClsCustomerDataRepositorySpi = mockk(relaxed = true)
+    private val crmCustomerProviderSpi: CrmCustomerProviderSpi = mockk(relaxed = true)
+    private val batchRepositorySpi: BatchRepositoryForContactsSpi = mockk(relaxed = true)
+
+    private lateinit var sut: ImportCustomersService
+
+    @BeforeTest
+    fun setup() {
+        sut = ImportCustomersService(
+            recordStepEventRepositorySpi = recordStepEventRepositorySpi,
+            clockProvider = clockProvider,
+            referenceIdFactory = referenceIdFactory,
+            crmClsCustomerDataRepositorySpi = crmClsCustomerDataRepositorySpi,
+            crmCustomerProviderSpi = crmCustomerProviderSpi,
+            batchRepositorySpi = batchRepositorySpi
+        )
+    }
+
+    // 🔹 TEST PRIVÉ via réflexion
+    @Test
+    fun `updateCrmClsDataWithCrmRoleResponse should update roleId`() {
+        // GIVEN
+        val customer = CrmClsCustomerData(
+            id = "CUST001",
+            batchid = "BATCH001",
+            reconciliationId = ReconciliationId.parse("REF001-ROW001"),
+            rowNumber = 1,
+            rowReference = ReferenceId("ROW001"),
+            crmData = CrmData(salesforceRoleId = "OLD_ROLE"),
+            clsData = emptyMap(),
+            crmInsertedId = null
+        )
+
+        val response = CrmRoleResponsePayload(
+            crmStatus = RecordStepStatus.OK,
+            crmMessage = "Role OK",
+            crmRoleId = "NEW_ROLE"
+        )
+
+        // WHEN : on appelle la méthode privée via reflection
+        val method = sut::class.declaredFunctions
+            .first { it.name == "updateCrmClsDataWithCrmRoleResponse" }
+        method.isAccessible = true
+
+        val updated = method.call(sut, customer, response) as CrmClsCustomerData
+
+        // THEN : le rôle doit être mis à jour
+        assertEquals("NEW_ROLE", updated.crmData.salesforceRoleId)
+    }
+}
