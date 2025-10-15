@@ -1,0 +1,83 @@
+@Test
+fun `should process role creation successfully`() {
+    // GIVEN
+    val crmCustomerData = CrmCLsCustomerData(
+        id = "CUST001",
+        batchId = "BATCH1234567",
+        reconciliationId = ReconciliationId.parse("REF1234567-ROW1234567"),
+        rowNumber = 1,
+        rowReference = ReferenceId("ROW1234567"),
+        crmData = CrmData(forename = "Marine", surname = "Dubois"),
+        clsData = emptyMap(),
+        crmInsertedId = "CRM001"
+    )
+
+    val crmContactData = CrmClsContactData(
+        id = "CONT001",
+        batchId = "BATCH1234567",
+        reconciliationId = ReconciliationId.parse("REF1234567-ROW1234567"),
+        rowNumber = 2,
+        rowReference = ReferenceId("ROW1234568"),
+        crmData = CrmData(forename = "Paul", surname = "Martin"),
+        clsData = emptyMap(),
+        crmInsertedId = "CRM002"
+    )
+
+    val roleData = CrmRoleData(
+        reconciliationId = ReconciliationId.parse("REF1234567-ROW1234567"),
+        batchId = "BATCH1234567",
+        rowNumber = 1,
+        crmCustomerData = crmCustomerData.crmData,  // ✅ On passe CrmData
+        crmContactData = crmContactData.crmData     // ✅ On passe CrmData
+    )
+
+    // WHEN
+    val payload = crmCustomerProvider.createRole(roleData)
+
+    // THEN
+    assertEquals(RecordStepStatus.OK, payload.crmStatus)
+    assertEquals("Role created", payload.crmMessage)
+    assertNotNull(payload.crmRoleId)
+}
+
+@Test
+fun `should process role update successfully`() {
+    // GIVEN
+    val crmCustomerData = CrmCLsCustomerData(
+        id = "CUST001",
+        batchId = "BATCH1234567",
+        reconciliationId = ReconciliationId.parse("REF1234567-ROW1234567"),
+        rowNumber = 1,
+        rowReference = ReferenceId("ROW1234567"),
+        crmData = CrmData(forename = "Marine", surname = "Dubois"),
+        clsData = emptyMap(),
+        crmInsertedId = "CRM001"
+    )
+
+    val crmContactData = CrmClsContactData(
+        id = "CONT001",
+        batchId = "BATCH1234567",
+        reconciliationId = ReconciliationId.parse("REF1234567-ROW1234567"),
+        rowNumber = 2,
+        rowReference = ReferenceId("ROW1234568"),
+        crmData = CrmData(forename = "Paul", surname = "Martin"),
+        clsData = emptyMap(),
+        crmInsertedId = "CRM002"
+    )
+
+    val roleData = CrmRoleData(
+        reconciliationId = ReconciliationId.parse("REF1234567-ROW1234567"),
+        batchId = "BATCH1234567",
+        rowNumber = 1,
+        crmCustomerData = crmCustomerData.crmData,  // ✅ On passe CrmData
+        crmContactData = crmContactData.crmData     // ✅ On passe CrmData
+    )
+
+    // WHEN
+    val payload = crmCustomerProvider.updateRole(roleData)
+
+    // THEN
+    assertEquals(RecordStepStatus.OK, payload.crmStatus)
+    assertEquals("Role updated", payload.crmMessage)
+    assertNotNull(payload.crmRoleId)
+}
