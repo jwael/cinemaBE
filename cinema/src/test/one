@@ -1,0 +1,110 @@
+import kotlin.test.*
+import com.arval.blm.core.domain.model.*
+import com.arval.blm.core.domain.model.crm.*
+import com.arval.blm.core.domain.model.batch.*
+import java.time.Instant
+
+class ImportCustomersServiceTest {
+
+    private lateinit var service: ImportCustomersService
+    private lateinit var recordEventRepository: InMemoryRecordStepEventRepository
+    private lateinit var clockProvider: FakeClockProvider
+    private lateinit var referenceIdFactory: ReferenceIdFactory
+    private lateinit var crmClsCustomerDataRepository: InMemoryCrmClsCustomerDataRepository
+    private lateinit var crmCustomerProvider: TestCrmCustomerProvider
+    private lateinit var batchRepository: InMemoryBatchRepository
+
+    @BeforeTest
+    fun setup() {
+        recordEventRepository = InMemoryRecordStepEventRepository()
+        clockProvider = FakeClockProvider()
+        referenceIdFactory = ReferenceIdFactory()
+        crmClsCustomerDataRepository = InMemoryCrmClsCustomerDataRepository()
+        crmCustomerProvider = TestCrmCustomerProvider()
+        batchRepository = InMemoryBatchRepository()
+
+        service = ImportCustomersService(
+            recordStepEventRepositorySpi = recordEventRepository,
+            clockProvider = clockProvider,
+            referenceIdFactory = referenceIdFactory,
+            crmCZsCustomerDataRepositorySpi = crmClsCustomerDataRepository,
+            crmcustomerProviderSpi = crmCustomerProvider,
+            batchRepositorySpi = batchRepository
+        )
+    }
+
+    @Test
+    fun `should process all customer and role steps successfully`() {
+        // GIVEN: un batch et un customerPayload unique
+        val batch = LoaderBatch(
+            reference = ReferenceId("BATCH123"),
+            triggeredBy = "user",
+            countryCode = CountryCode("FR"),
+            type = LoaderBatchType.CONTACTS,
+            startDate = Instant.now(),
+            totalContacts = 1
+        )
+
+        val customerPayload = CustomerPayload(
+            rowNumber = 1,
+            reconciliationId = ReconciliationId.parse("REF123-ROW123"),
+            errorMessage = null
+        )
+
+        // WHEN: on applique le batch
+        service.apply(batch, listOf(customerPayload))
+
+        // THEN: Vérifie que le customer a été sauvegardé en BLM
+        val savedCustomer = crmClsCustomerDataRepository.saved.firstOrNull()
+        assertNotNull(savedCustomer)
+
+        // Vérifie qu'un RecordStepEvent a été créé
+        val savedEvent = recordEventRepository.saved.firstOrNull()
+        assertNotNull(savedEvent)
+        assertEquals(RecordStepStatus.OK, savedEvent!!.stepStatus)
+        assertEquals(savedCustomer.batchId, savedEvent.batchId)
+        assertEquals(savedCustomer.rowNumber, savedEvent.rowNumber)
+
+        // Vérifie que les méthodes CRM ont été appelées pour création/updation
+        assertTrue(crmCustomerProvider.createCustomerCalled)
+        assertTrue(crmCustomerProvider.updateCustomerCalled)
+        assertTrue(crmCustomerProvider.createRoleCalled)
+        assertTrue(crmCustomerProvider.updateRoleCalled)
+
+        // Vérifie que le batch a été mis à jour
+        val updatedBatch = batchRepository.updated.firstOrNull()
+        assertNotNull(updatedBatch)
+        assertEquals(LoaderBatchStatus.SUCCESS, updatedBatch!!.status)
+    }
+}
+
+/**
+ * Implémentation test de CrmCustomerProviderSpi pour vérifier les appels.
+ */
+class TestCrmCustomerProvider : CrmCustomerProviderSpi {
+
+    var createCustomerCalled = false
+    var updateCustomerCalled = false
+    var createRoleCalled = false
+    var updateRoleCalled = false
+
+    override fun createCrmCustomer(crmClsCustomerData: CrmCLsCustomerData): CrmCustomerResponsePayload {
+        createCustomerCalled = true
+        return CrmCustomerResponsePayload(RecordStepStatus.OK, "Customer created", "ACC123", null)
+    }
+
+    override fun updateCrmCustomer(crmClsCustomerData: CrmCLsCustomerData): CrmCustomerResponsePayload {
+        updateCustomerCalled = true
+        return CrmCustomerResponsePayload(RecordStepStatus.OK, "Customer updated", "ACC123", null)
+    }
+
+    override fun createRole(crmRoleData: CrmRoleData): CrmRoleResponsePayload {
+        createRoleCalled = true
+        return CrmRoleResponsePayload(RecordStepStatus.OK, "Role created", "ROLE123")
+    }
+
+    override fun updateRole(crmRoleData: CrmRoleData): CrmRoleResponsePayload {
+        updateRoleCalled = true
+        return CrmRoleResponsePayload(RecordStepStatus.OK, "Role updated", "ROLE123")
+    }
+}
