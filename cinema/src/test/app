@@ -1,0 +1,116 @@
+@Test
+fun `apply should process KO, create-update customer and create-update role safely`() {
+    // GIVEN
+    val batch = LoaderBatch(
+        id = "BATCH_1",
+        reference = ReferenceId("REF0000001"),
+        fileName = "f.csv",
+        triggeredBy = "user1",
+        countryCode = CountryCode("FR"),
+        status = LoaderBatchStatus.RUNNING,
+        type = LoaderBatchType.CONTACTS,
+        startDate = Instant.now(),
+        endDate = null,
+        totalContacts = 3
+    )
+
+    val faultyCustomer = CustomerPayload(
+        rowNumber = 1,
+        crmData = CrmData(), // erreur simulée
+        clsData = emptyMap(),
+        errorMessage = "SOME ERROR"
+    )
+
+    val customerToCreate = CustomerPayload(
+        rowNumber = 2,
+        crmData = CrmData(
+            salesforceContactId = "CONTACT123",
+            salesforceRoleId = "ROLE123",
+            contactRole = null,
+            salesforceAccountId = null,
+            mainContact = null
+        ),
+        clsData = emptyMap(),
+        errorMessage = null
+    )
+
+    val customerToUpdate = CustomerPayload(
+        rowNumber = 3,
+        crmData = CrmData(
+            salesforceContactId = "CONTACT123",
+            salesforceRoleId = null,
+            contactRole = "ROLE_DRIVER",
+            salesforceAccountId = "ACC_789",
+            mainContact = true
+        ),
+        clsData = emptyMap(),
+        errorMessage = null
+    )
+
+    // Capture tous les événements dans une seule liste
+    val slotEvents = mutableListOf<RecordStepEvent>()
+    every { recordStepEventRepositorySpi.save(recordStepEvent = capture(slotEvents)) } answers { firstArg() }
+
+    // CRM Provider simulé
+    every { crmCustomerProviderSpi.createCrmCustomer(any()) } returns CrmCustomerResponsePayload(
+        crmStatus = RecordStepStatus.OK,
+        crmMessage = "Customer created",
+        crmAccountId = "ACC001",
+        crmRoleId = null
+    )
+    every { crmCustomerProviderSpi.updateCrmCustomer(any()) } returns CrmCustomerResponsePayload(
+        crmStatus = RecordStepStatus.OK,
+        crmMessage = "Customer updated",
+        crmAccountId = "ACC002",
+        crmRoleId = null
+    )
+    every { crmCustomerProviderSpi.createCrmRole(any()) } returns CrmRoleResponsePayload(
+        crmStatus = RecordStepStatus.OK,
+        crmMessage = "Role created",
+        crmRoleId = "ROLE001"
+    )
+    every { crmCustomerProviderSpi.updateCrmRole(any()) } returns CrmRoleResponsePayload(
+        crmStatus = RecordStepStatus.OK,
+        crmMessage = "Role updated",
+        crmRoleId = "ROLE002"
+    )
+
+    // WHEN
+    sut.apply(batch, listOf(faultyCustomer, customerToCreate, customerToUpdate))
+
+    // THEN: KO event pour faultyCustomer
+    val koEvent = slotEvents.find { it.stepMessage?.contains("SOME ERROR") == true }
+    assertNotNull(koEvent, "Expected a KO event for faulty customer")
+    assertEquals(RecordStepStatus.KO, koEvent.stepStatus)
+
+    // THEN: création de client
+    val createdEvent = slotEvents.find { it.stepMessage?.contains("Customer created") == true }
+    assertNotNull(createdEvent, "Expected a Customer created event")
+    assertEquals(RecordStepStatus.OK, createdEvent.stepStatus)
+
+    // THEN: mise à jour de client
+    val updatedEvent = slotEvents.find { it.stepMessage?.contains("Customer updated") == true }
+    assertNotNull(updatedEvent, "Expected a Customer updated event")
+    assertEquals(RecordStepStatus.OK, updatedEvent.stepStatus)
+
+    // THEN: création de rôle
+    val roleCreatedEvent = slotEvents.find { it.stepMessage?.contains("Role created") == true }
+    assertNotNull(roleCreatedEvent, "Expected a Role created event")
+    assertEquals(RecordStepStatus.OK, roleCreatedEvent.stepStatus)
+
+    // THEN: mise à jour de rôle
+    val roleUpdatedEvent = slotEvents.find { it.stepMessage?.contains("Role updated") == true }
+    assertNotNull(roleUpdatedEvent, "Expected a Role updated event")
+    assertEquals(RecordStepStatus.OK, roleUpdatedEvent.stepStatus)
+
+    // Vérifications des appels CRM
+    verify(exactly = 1) { crmCustomerProviderSpi.createCrmCustomer(any()) }
+    verify(exactly = 1) { crmCustomerProviderSpi.updateCrmCustomer(any()) }
+    verify(exactly = 1) { crmCustomerProviderSpi.createCrmRole(any()) }
+    verify(exactly = 1) { crmCustomerProviderSpi.updateCrmRole(any()) }
+
+    // Vérifications des sauvegardes
+    verify(exactly = 3) { crmClsCustomerDataRepositorySpi.save(any()) }
+    verify(exactly = 5) { recordStepEventRepositorySpi.save(any()) }
+    verify(exactly = 1) { batchRepositorySpi.save(batch) }
+}
