@@ -1,0 +1,23 @@
+@Test
+fun `updateCrmClsDataWithCrmRoleResponse should update crmInsertedId`() {
+    // GIVEN
+    val customer = givenCustomerBase()
+    val response = CrmRoleResponsePayLoad(
+        crmStatus = RecordStepStatus.OK,
+        crmMessage = "Role OK",
+        crmRoleId = "NEW_ROLE"
+    )
+
+    // WHEN
+    val updated = sut.updateCrmClsDataWithCrmRoleResponse(
+        crmClsCustomerData = customer,
+        crmRoleResponsePayLoad = response
+    )
+
+    // THEN
+    assertEquals(
+        expected = "NEW_ROLE",
+        actual = updated.crmInsertedId,
+        message = "crmInsertedId should be updated with the crmRoleId from response"
+    )
+}
