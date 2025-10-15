@@ -1,0 +1,118 @@
+import kotlin.test.*
+import com.arval.blm.core.domain.model.crm.*
+import com.arval.blm.core.domain.model.ReconciliationId
+import com.arval.blm.core.domain.model.ReferenceId
+
+class CrmClsCustomerDataTest {
+
+    private lateinit var crmDataCreate: CrmData
+    private lateinit var crmDataUpdate: CrmData
+    private lateinit var crmDataInvalid: CrmData
+    private lateinit var crmDataForUpdateCheck: CrmData
+
+    @BeforeTest
+    fun setup() {
+        // Pour isCreateRole : tous les champs de rôle null
+        crmDataCreate = CrmData(
+            salesforceContactId = null,
+            salesforceRoleId = null,
+            contactRole = null,
+            salesforceAccountId = null,
+            mainContact = null
+        )
+
+        // Pour isUpdateRole : contactId rempli, roleId null
+        crmDataUpdate = CrmData(
+            salesforceContactId = "CONTACT123",
+            salesforceRoleId = null,
+            contactRole = "ROLE_DRIVER",
+            salesforceAccountId = "ACC123",
+            mainContact = true
+        )
+
+        // Pour validateRoles : champ interdit présent
+        crmDataInvalid = CrmData(
+            salesforceContactId = "CONTACT123",
+            salesforceRoleId = "ROLE123",
+            contactRole = "ROLE_DRIVER",
+            salesforceAccountId = "ACC123",
+            mainContact = true,
+            partnerNetwork = "NOT_ALLOWED" // champ interdit pour trigger exception
+        )
+
+        // Pour isCrUpdate : salesforceAccountId null
+        crmDataForUpdateCheck = CrmData(
+            salesforceContactId = "CONTACT456",
+            salesforceRoleId = "ROLE456",
+            contactRole = "ROLE_PASSENGER",
+            salesforceAccountId = null,
+            mainContact = false
+        )
+    }
+
+    @Test
+    fun `isCreateRole should return true when all role fields are null`() {
+        val customer = CrmClsCustomerData(
+            id = "CUST001",
+            batchid = "BATCH001",
+            reconciliationId = ReconciliationId.parse("REF001-ROW001"),
+            rowNumber = 1,
+            rowReference = ReferenceId("ROW001"),
+            crmData = crmDataCreate,
+            clsData = emptyMap(),
+            crmInsertedId = null
+        )
+
+        assertTrue(customer.isCreateRole(), "Expected isCreateRole to be true")
+        assertFalse(customer.isUpdateRole(), "Expected isUpdateRole to be false")
+    }
+
+    @Test
+    fun `isUpdateRole should return true when contactId is set and roleId is null`() {
+        val customer = CrmClsCustomerData(
+            id = "CUST002",
+            batchid = "BATCH002",
+            reconciliationId = ReconciliationId.parse("REF002-ROW002"),
+            rowNumber = 2,
+            rowReference = ReferenceId("ROW002"),
+            crmData = crmDataUpdate,
+            clsData = emptyMap(),
+            crmInsertedId = "CRM002"
+        )
+
+        assertTrue(customer.isUpdateRole(), "Expected isUpdateRole to be true")
+        assertFalse(customer.isCreateRole(), "Expected isCreateRole to be false")
+    }
+
+    @Test
+    fun `isCrUpdate should return true when salesforceAccountId is null`() {
+        val customer = CrmClsCustomerData(
+            id = "CUST003",
+            batchid = "BATCH003",
+            reconciliationId = ReconciliationId.parse("REF003-ROW003"),
+            rowNumber = 3,
+            rowReference = ReferenceId("ROW003"),
+            crmData = crmDataForUpdateCheck,
+            clsData = emptyMap(),
+            crmInsertedId = "CRM003"
+        )
+
+        assertTrue(customer.isCrUpdate(), "Expected isCrUpdate to be true")
+    }
+
+    @Test
+    fun `validateRoles should throw exception when unexpected fields are set`() {
+        assertFailsWith<IllegalArgumentException>("Expected exception for unexpected fields") {
+            CrmClsCustomerData(
+                id = "CUST004",
+                batchid = "BATCH004",
+                reconciliationId = ReconciliationId.parse("REF004-ROW004"),
+                rowNumber = 4,
+                rowReference = ReferenceId("ROW004"),
+                crmData = crmDataInvalid,
+                clsData = emptyMap(),
+                crmInsertedId = "CRM004"
+            )
+        }
+    }
+}
