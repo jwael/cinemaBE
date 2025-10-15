@@ -1,0 +1,216 @@
+import io.mockk.*
+import kotlin.test.*
+import com.arval.blm.core.domain.model.*
+import com.arval.blm.core.domain.model.crm.*
+import com.arval.blm.core.domain.model.batch.*
+import java.time.Instant
+
+class ImportCustomersServiceTest {
+
+    private val recordStepEventRepositorySpi: RecordStepEventRepositorySpi = mockk(relaxed = true)
+    private val clockProvider: ClockProvider = mockk()
+    private val referenceIdFactory: ReferenceIdFactory = mockk()
+    private val crmClsCustomerDataRepositorySpi: CrmClsCustomerDataRepositorySpi = mockk(relaxed = true)
+    private val crmCustomerProviderSpi: CrmCustomerProviderSpi = mockk(relaxed = true)
+    private val batchRepositorySpi: BatchRepositoryForContactsSpi = mockk(relaxed = true)
+
+    private lateinit var sut: ImportCustomersService
+
+    @BeforeTest
+    fun setup() {
+        every { clockProvider.now() } returns Instant.parse("2025-10-14T00:00:00Z")
+        every { referenceIdFactory.generate() } returns ReferenceId("0123456789")
+        every { crmClsCustomerDataRepositorySpi.save(any()) } answers { firstArg() }
+        every { batchRepositorySpi.save(any()) } answers { firstArg() }
+        every { recordStepEventRepositorySpi.save(any()) } answers { firstArg() }
+
+        sut = ImportCustomersService(
+            recordStepEventRepositorySpi = recordStepEventRepositorySpi,
+            clockProvider = clockProvider,
+            referenceIdFactory = referenceIdFactory,
+            crmCZsCustomerDataRepositorySpi = crmClsCustomerDataRepositorySpi,
+            crmcustomerProviderSpi = crmCustomerProviderSpi,
+            batchRepositorySpi = batchRepositorySpi
+        )
+    }
+
+    private fun givenCustomerBase(): CrmClsCustomerData {
+        return CrmClsCustomerData(
+            id = "CUST001",
+            batchid = "BATCH001",
+            reconciliationId = ReconciliationId.parse("REF001-ROW001"),
+            rowNumber = 1,
+            rowReference = ReferenceId("ROW001"),
+            crmData = CrmData(),
+            clsData = emptyMap(),
+            crmInsertedId = null
+        )
+    }
+
+    @Test
+    fun `updateCrmClsDataWithCrmRoleResponse should update crmInsertedId`() {
+        val customer = givenCustomerBase()
+        val response = CrmRoleResponsePayLoad(
+            crmStatus = RecordStepStatus.OK,
+            crmMessage = "Role OK",
+            crmRoleId = "NEW_ROLE"
+        )
+
+        val updated = sut.updateCrmClsDataWithCrmRoleResponse(
+            crmClsCustomerData = customer,
+            crmRoleResponsePayLoad = response
+        )
+
+        assertEquals("NEW_ROLE", updated.crmInsertedId)
+    }
+
+    @Test
+    fun `updateCrmClsDataWithCrmResponse should update crmInsertedId`() {
+        val customer = givenCustomerBase()
+        val response = CrmCustomerResponsePayload(
+            crmStatus = RecordStepStatus.OK,
+            crmMessage = "Customer OK",
+            crmAccountId = "ACC001",
+            crmRoleId = null
+        )
+
+        val updated = sut.updateCrmClsDataWithCrmResponse(
+            crmClsCustomerData = customer,
+            crmCustomerResponsePayLoad = response
+        )
+
+        assertEquals("ACC001", updated.crmInsertedId)
+    }
+
+    @Test
+    fun `createCrmClsCustomerData should create new CrmClsCustomerData`() {
+        val batch = LoaderBatch(
+            id = "BATCH_001",
+            reference = ReferenceId("REF001"),
+            fileName = "file.csv",
+            triggeredBy = "user",
+            countryCode = CountryCode("FR"),
+            status = LoaderBatchStatus.RUNNING,
+            type = LoaderBatchType.CONTACTS,
+            startDate = Instant.now(),
+            endDate = null,
+            totalContacts = 1
+        )
+
+        val customerPayload = CustomerPayload(
+            rowNumber = 1,
+            reconciliationId = ReconciliationId.parse("REF001-ROW001"),
+            errorMessage = null,
+            crmData = CrmData(),
+            clsData = emptyMap()
+        )
+
+        val crmClsCustomerData = sut.createCrmClsCustomerData(batch, customerPayload)
+
+        assertEquals(batch.id, crmClsCustomerData.batchid)
+        assertEquals(customerPayload.rowNumber, crmClsCustomerData.rowNumber)
+        assertEquals(customerPayload.reconciliationId, crmClsCustomerData.reconciliationId)
+    }
+
+    @Test
+    fun `updateBatchStatus should return batch with updated status`() {
+        val batch = LoaderBatch(
+            id = "BATCH_001",
+            reference = ReferenceId("REF001"),
+            fileName = "file.csv",
+            triggeredBy = "user",
+            countryCode = CountryCode("FR"),
+            status = LoaderBatchStatus.RUNNING,
+            type = LoaderBatchType.CONTACTS,
+            startDate = Instant.now(),
+            endDate = null,
+            totalContacts = 1
+        )
+
+        val updatedBatch = sut.updateBatchStatus(batch)
+
+        assertEquals(LoaderBatchStatus.COMPLETED, updatedBatch.status)
+    }
+
+    @Test
+    fun `processCustomerSavingInBlmStep should save and record event`() {
+        val customer = givenCustomerBase()
+        val saved = sut.processCustomerSavingInBlmStep(customer)
+
+        assertNotNull(saved)
+        verify { crmClsCustomerDataRepositorySpi.save(customer) }
+        verify { recordStepEventRepositorySpi.save(any()) }
+    }
+
+    @Test
+    fun `processCustomerCreationInCrmStep should call createCrmCustomer`() {
+        val customer = givenCustomerBase()
+
+        every { crmCustomerProviderSpi.createCrmCustomer(customer) } returns CrmCustomerResponsePayload(
+            crmStatus = RecordStepStatus.OK,
+            crmMessage = "Customer created",
+            crmAccountId = "ACC123",
+            crmRoleId = null
+        )
+
+        sut.processCustomerCreationInCrmStep(customer)
+
+        verify { crmCustomerProviderSpi.createCrmCustomer(customer) }
+    }
+
+    @Test
+    fun `processCustomerUpdateInCrmStep should call updateCrmCustomer`() {
+        val customer = givenCustomerBase()
+
+        every { crmCustomerProviderSpi.updateCrmCustomer(customer) } returns CrmCustomerResponsePayload(
+            crmStatus = RecordStepStatus.OK,
+            crmMessage = "Customer updated",
+            crmAccountId = "ACC123",
+            crmRoleId = null
+        )
+
+        sut.processCustomerUpdateInCrmStep(customer)
+
+        verify { crmCustomerProviderSpi.updateCrmCustomer(customer) }
+    }
+
+    @Test
+    fun `processRoleCreationInCrmStep should call createCrmRole`() {
+        val customer = givenCustomerBase()
+        val roleData = CrmRoleData(
+            reconciliationId = customer.reconciliationId,
+            batchId = customer.batchid,
+            rowNumber = customer.rowNumber
+        )
+
+        every { crmCustomerProviderSpi.createRole(roleData) } returns CrmRoleResponsePayLoad(
+            crmStatus = RecordStepStatus.OK,
+            crmMessage = "Role created",
+            crmRoleId = "ROLE123"
+        )
+
+        sut.processRoleCreationInCrmStep(customer)
+
+        verify { crmCustomerProviderSpi.createRole(any()) }
+    }
+
+    @Test
+    fun `processRoleUpdateInCrmStep should call updateCrmRole`() {
+        val customer = givenCustomerBase()
+        val roleData = CrmRoleData(
+            reconciliationId = customer.reconciliationId,
+            batchId = customer.batchid,
+            rowNumber = customer.rowNumber
+        )
+
+        every { crmCustomerProviderSpi.updateCrmRole(roleData) } returns CrmRoleResponsePayLoad(
+            crmStatus = RecordStepStatus.OK,
+            crmMessage = "Role updated",
+            crmRoleId = "ROLE123"
+        )
+
+        sut.processRoleUpdateInCrmStep(customer)
+
+        verify { crmCustomerProviderSpi.updateCrmRole(any()) }
+    }
+}
