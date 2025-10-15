@@ -1,0 +1,78 @@
+import kotlin.test.*
+import com.arval.blm.core.domain.model.*
+import com.arval.blm.core.domain.model.crm.*
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+
+class CrmClsCustomerDataTest {
+
+    private lateinit var crmClsCustomerData: CrmClsCustomerData
+
+    @BeforeEach
+    fun setup() {
+        val crmData = CrmData(
+            forename = "Marine",
+            surname = "Dubois",
+            salesforceAccountId = "SF_ACC_001",
+            salesforceContactId = "SF_CONT_001",
+            salesforceRoleId = "SF_ROLE_001",
+            contactRole = "ROLE_DRIVER",
+            mainContact = true,
+            personalCountry = "France",
+            mainCountry = "France",
+            country = "FR",
+            prefLanguageComm = "French",
+            partnerNetwork = null,
+            startDate = null,
+            endDate = null,
+            authorizedSignature = true
+        )
+
+        crmClsCustomerData = CrmClsCustomerData(
+            id = "CUST001",
+            batchid = "BATCH1234567",
+            reconciliationId = ReconciliationId.parse("REF1234567-ROW1234567"),
+            rowNumber = 1,
+            rowReference = ReferenceId("ROW1234567"),
+            crmbata = crmData,
+            clsData = mapOf("segment" to "B2C"),
+            crmInsertedId = "CRM001"
+        )
+    }
+
+    @Test
+    fun `isCrUpdate should return false when salesforceAccountId is present`() {
+        assertFalse(crmClsCustomerData.isCrUpdate())
+    }
+
+    @Test
+    fun `isCreateRole should return false when contactRole and ids are set`() {
+        assertFalse(crmClsCustomerData.isCreateRole())
+    }
+
+    @Test
+    fun `isUpdateRole should return false when role and contact ids are set`() {
+        assertFalse(crmClsCustomerData.isUpdateRole())
+    }
+
+    @Test
+    fun `validateRoles should throw exception when unexpected field is present`() {
+        val invalidCrmData = crmClsCustomerData.crmbata.copy(partnerNetwork = "INVALID")
+        val invalidCustomerData = crmClsCustomerData.copy(crmbata = invalidCrmData)
+
+        val exception = assertFailsWith<IllegalArgumentException> {
+            // La validation est dans init, donc on force la création
+            CrmClsCustomerData(
+                id = invalidCustomerData.id,
+                batchid = invalidCustomerData.batchid,
+                reconciliationId = invalidCustomerData.reconciliationId,
+                rowNumber = invalidCustomerData.rowNumber,
+                rowReference = invalidCustomerData.rowReference,
+                crmbata = invalidCrmData,
+                clsData = invalidCustomerData.clsData,
+                crmInsertedId = invalidCustomerData.crmInsertedId
+            )
+        }
+        assertTrue(exception.message!!.contains("Unexpected fields"))
+    }
+}
