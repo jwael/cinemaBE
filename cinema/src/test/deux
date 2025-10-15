@@ -1,0 +1,136 @@
+import io.mockk.*
+import kotlin.test.*
+import com.arval.blm.core.domain.model.*
+import com.arval.blm.core.domain.model.crm.*
+import com.arval.blm.core.domain.model.batch.*
+import java.time.Instant
+
+class ImportCustomersServiceTest {
+
+    private val recordStepEventRepositorySpi: RecordStepEventRepositorySpi = mockk(relaxed = true)
+    private val clockProvider: ClockProvider = mockk()
+    private val referenceIdFactory: ReferenceIdFactory = mockk()
+    private val crmClsCustomerDataRepositorySpi: CrmClsCustomerDataRepositorySpi = mockk(relaxed = true)
+    private val crmCustomerProviderSpi: CrmCustomerProviderSpi = mockk(relaxed = true)
+    private val batchRepositorySpi: BatchRepositoryForContactsSpi = mockk(relaxed = true)
+
+    private lateinit var sut: ImportCustomersService
+
+    @BeforeTest
+    fun setup() {
+        every { clockProvider.now() } returns Instant.parse("2025-10-14T00:00:00Z")
+        every { referenceIdFactory.generate() } returns ReferenceId("0123456789")
+        every { crmClsCustomerDataRepositorySpi.save(any()) } answers { firstArg() }
+        every { batchRepositorySpi.save(any()) } answers { firstArg() }
+        every { recordStepEventRepositorySpi.save(any()) } answers { firstArg() }
+
+        sut = ImportCustomersService(
+            recordStepEventRepositorySpi,
+            clockProvider,
+            referenceIdFactory,
+            crmClsCustomerDataRepositorySpi,
+            crmCustomerProviderSpi,
+            batchRepositorySpi
+        )
+    }
+
+    @Test
+    fun `apply should process KO, create/update customer and create/update role with individual verifications`() {
+        // GIVEN: batch et 3 clients (KO, create, update)
+        val batch = LoaderBatch(
+            id = "BATCH_1",
+            reference = ReferenceId("REF0000001"),
+            fileName = "f.csv",
+            triggeredBy = "user1",
+            countryCode = CountryCode("FR"),
+            status = LoaderBatchStatus.RUNNING,
+            type = LoaderBatchType.CONTACTS,
+            startDate = Instant.now(),
+            endDate = null,
+            totalContacts = 3
+        )
+
+        val faultyCustomer = CustomerPayload(
+            rowNumber = 1,
+            crmData = CrmData(errorMessage = "SOME ERROR"),
+            clsData = emptyMap(),
+            errorMessage = "SOME ERROR"
+        )
+
+        val customerToCreate = CustomerPayload(
+            rowNumber = 2,
+            crmData = CrmData(
+                salesforceContactId = "CONTACT123",
+                salesforceRoleId = "ROLE123"
+            ),
+            clsData = emptyMap(),
+            errorMessage = null
+        )
+
+        val customerToUpdate = CustomerPayload(
+            rowNumber = 3,
+            crmData = CrmData(
+                salesforceContactId = "CONTACT123",
+                contactRole = "ROLE_DRIVER",
+                salesforceAccountId = "ACC_789",
+                mainContact = true
+            ),
+            clsData = emptyMap(),
+            errorMessage = null
+        )
+
+        // Slots pour vérifier chaque événement
+        val slotKO = slot<RecordStepEvent>()
+        val slotCreateCustomer = slot<RecordStepEvent>()
+        val slotUpdateCustomer = slot<RecordStepEvent>()
+        val slotCreateRole = slot<RecordStepEvent>()
+        val slotUpdateRole = slot<RecordStepEvent>()
+
+        every { recordStepEventRepositorySpi.save(capture(slotKO)) } answers { firstArg() }
+        every { recordStepEventRepositorySpi.save(capture(slotCreateCustomer)) } answers { firstArg() }
+        every { recordStepEventRepositorySpi.save(capture(slotUpdateCustomer)) } answers { firstArg() }
+        every { recordStepEventRepositorySpi.save(capture(slotCreateRole)) } answers { firstArg() }
+        every { recordStepEventRepositorySpi.save(capture(slotUpdateRole)) } answers { firstArg() }
+
+        // Mocks CRM Provider
+        every { crmCustomerProviderSpi.createCrmCustomer(any()) } returns CrmCustomerResponsePayload(
+            RecordStepStatus.OK, "Customer created", "ACC001", null
+        )
+        every { crmCustomerProviderSpi.updateCrmCustomer(any()) } returns CrmCustomerResponsePayload(
+            RecordStepStatus.OK, "Customer updated", "ACC002", null
+        )
+        every { crmCustomerProviderSpi.createRole(any()) } returns CrmRoleResponsePayload(
+            RecordStepStatus.OK, "Role created", "ROLE001"
+        )
+        every { crmCustomerProviderSpi.updateRole(any()) } returns CrmRoleResponsePayload(
+            RecordStepStatus.OK, "Role updated", "ROLE002"
+        )
+
+        // WHEN
+        sut.apply(batch, listOf(faultyCustomer, customerToCreate, customerToUpdate))
+
+        // THEN: KO event
+        assertEquals("SOME ERROR", slotKO.captured.stepMessage)
+        assertEquals(RecordStepStatus.KO, slotKO.captured.stepStatus)
+
+        // THEN: Create customer
+        verify(exactly = 1) { crmCustomerProviderSpi.createCrmCustomer(any()) }
+        assertEquals("Customer created", slotCreateCustomer.captured.stepMessage)
+        assertEquals(RecordStepStatus.OK, slotCreateCustomer.captured.stepStatus)
+
+        // THEN: Update customer
+        verify(exactly = 1) { crmCustomerProviderSpi.updateCrmCustomer(any()) }
+        assertEquals("Customer updated", slotUpdateCustomer.captured.stepMessage)
+        assertEquals(RecordStepStatus.OK, slotUpdateCustomer.captured.stepStatus)
+
+        // THEN: Create role
+        verify(exactly = 1) { crmCustomerProviderSpi.createRole(any()) }
+        assertEquals("Role created", slotCreateRole.captured.stepMessage)
+        assertEquals(RecordStepStatus.OK, slotCreateRole.captured.stepStatus)
+
+        // THEN: Update role
+        verify(exactly = 1) { crmCustomerProviderSpi.updateRole(any()) }
+        assertEquals("Role updated", slotUpdateRole.captured.stepMessage)
+        assertEquals(RecordStepStatus.OK, slotUpdateRole.captured.stepStatus)
+    }
+}
