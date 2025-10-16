@@ -1,0 +1,204 @@
+import kotlin.test.*
+import io.mockk.*
+import java.time.Instant
+import com.arval.blm.core.domain.model.*
+
+class ImportCustomersServiceTest {
+
+    private val recordStepEventRepositorySpi: RecordStepEventRepositorySpi = mockk(relaxed = true)
+    private val clockProvider: ClockProvider = mockk()
+    private val referenceIdFactory: ReferenceIdFactory = mockk()
+    private val crmClsCustomerDataRepositorySpi: CrmClsCustomerDataRepositorySpi = mockk(relaxed = true)
+    private val crmCustomerProviderSpi: CrmCustomerProviderSpi = mockk(relaxed = true)
+    private val batchRepositorySpi: BatchRepositoryForContactsSpi = mockk(relaxed = true)
+
+    private lateinit var sut: ImportCustomersService
+
+    @BeforeTest
+    fun setup() {
+        every { clockProvider.now() } returns Instant.parse("2025-10-14T00:00:00Z")
+        every { referenceIdFactory.generate() } returns ReferenceId("0123456789")
+        every { crmClsCustomerDataRepositorySpi.save(any()) } answers { firstArg() }
+        every { batchRepositorySpi.save(any()) } answers { firstArg() }
+        every { recordStepEventRepositorySpi.save(any()) } answers { firstArg() }
+
+        sut = ImportCustomersService(
+            recordStepEventRepositorySpi,
+            clockProvider,
+            referenceIdFactory,
+            crmClsCustomerDataRepositorySpi,
+            crmCustomerProviderSpi,
+            batchRepositorySpi
+        )
+    }
+
+    // =============================
+    // Test createCrmCustomer
+    // =============================
+    @Test
+    fun `createCrmCustomer branch is called`() {
+        val batch = LoaderBatch(
+            id = "BATCH_1",
+            reference = ReferenceId("REF001"),
+            fileName = "file.csv",
+            triggeredBy = "user1",
+            countryCode = CountryCode("FR"),
+            status = LoaderBatchStatus.RUNNING,
+            type = LoaderBatchType.CONTACTS,
+            startDate = Instant.now(),
+            endDate = null,
+            totalContacts = 1
+        )
+
+        val customerPayload = CustomerPayload(
+            rowNumber = 1,
+            crmData = CrmData(
+                salesforceContactId = null,
+                salesforceRoleId = null,
+                contactRole = null,
+                salesforceAccountId = null,
+                mainContact = null
+            ),
+            clsData = emptyMap(),
+            errorMessage = null
+        )
+
+        every { crmCustomerProviderSpi.createCrmCustomer(any()) } returns CrmCustomerResponsePayload(
+            crmStatus = RecordStepStatus.OK,
+            crmMessage = "Customer created",
+            crmAccountId = "ACC001",
+            crmRoleId = null
+        )
+
+        sut.apply(batch, listOf(customerPayload))
+
+        verify(exactly = 1) { crmCustomerProviderSpi.createCrmCustomer(any()) }
+    }
+
+    // =============================
+    // Test updateCrmCustomer
+    // =============================
+    @Test
+    fun `updateCrmCustomer branch is called`() {
+        val batch = LoaderBatch(
+            id = "BATCH_2",
+            reference = ReferenceId("REF002"),
+            fileName = "file.csv",
+            triggeredBy = "user1",
+            countryCode = CountryCode("FR"),
+            status = LoaderBatchStatus.RUNNING,
+            type = LoaderBatchType.CONTACTS,
+            startDate = Instant.now(),
+            endDate = null,
+            totalContacts = 1
+        )
+
+        val customerPayload = CustomerPayload(
+            rowNumber = 2,
+            crmData = CrmData(
+                salesforceContactId = "CONTACT123",
+                salesforceRoleId = null,
+                contactRole = null,
+                salesforceAccountId = "ACC123",
+                mainContact = null
+            ),
+            clsData = emptyMap(),
+            errorMessage = null
+        )
+
+        every { crmCustomerProviderSpi.updateCrmCustomer(any()) } returns CrmCustomerResponsePayload(
+            crmStatus = RecordStepStatus.OK,
+            crmMessage = "Customer updated",
+            crmAccountId = "ACC123",
+            crmRoleId = null
+        )
+
+        sut.apply(batch, listOf(customerPayload))
+
+        verify(exactly = 1) { crmCustomerProviderSpi.updateCrmCustomer(any()) }
+    }
+
+    // =============================
+    // Test createCrmRole
+    // =============================
+    @Test
+    fun `createCrmRole branch is called`() {
+        val batch = LoaderBatch(
+            id = "BATCH_3",
+            reference = ReferenceId("REF003"),
+            fileName = "file.csv",
+            triggeredBy = "user1",
+            countryCode = CountryCode("FR"),
+            status = LoaderBatchStatus.RUNNING,
+            type = LoaderBatchType.CONTACTS,
+            startDate = Instant.now(),
+            endDate = null,
+            totalContacts = 1
+        )
+
+        val customerPayload = CustomerPayload(
+            rowNumber = 3,
+            crmData = CrmData(
+                salesforceContactId = null,
+                salesforceRoleId = null,
+                contactRole = "DRIVER",
+                salesforceAccountId = null,
+                mainContact = null
+            ),
+            clsData = emptyMap(),
+            errorMessage = null
+        )
+
+        every { crmCustomerProviderSpi.createCrmRole(any()) } returns CrmRoleResponsePayload(
+            crmStatus = RecordStepStatus.OK,
+            crmMessage = "Role created",
+            crmRoleId = "ROLE001"
+        )
+
+        sut.apply(batch, listOf(customerPayload))
+
+        verify(exactly = 1) { crmCustomerProviderSpi.createCrmRole(any()) }
+    }
+
+    // =============================
+    // Test updateCrmRole
+    // =============================
+    @Test
+    fun `updateCrmRole branch is called`() {
+        val batch = LoaderBatch(
+            id = "BATCH_4",
+            reference = ReferenceId("REF004"),
+            fileName = "file.csv",
+            triggeredBy = "user1",
+            countryCode = CountryCode("FR"),
+            status = LoaderBatchStatus.RUNNING,
+            type = LoaderBatchType.CONTACTS,
+            startDate = Instant.now(),
+            endDate = null,
+            totalContacts = 1
+        )
+
+        val customerPayload = CustomerPayload(
+            rowNumber = 4,
+            crmData = CrmData(
+                salesforceContactId = "CONTACT123",
+                salesforceRoleId = null,
+                contactRole = "DRIVER",
+                salesforceAccountId = "ACC123",
+                mainContact = true
+            ),
+            clsData = emptyMap(),
+            errorMessage = null
+        )
+
+        every { crmCustomerProviderSpi.updateCrmRole(any()) } returns CrmRoleResponsePayload(
+            crmStatus = RecordStepStatus.OK,
+            crmMessage = "Role updated",
+            crmRoleId = "ROLE002"
+        )
+
+        sut.apply(batch, listOf(customerPayload))
+
+        verify(exactly = 1) { crmCustomerProviderSpi.updateCrmRole(any()) }
+    }
+}
