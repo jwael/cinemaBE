@@ -1,0 +1,99 @@
+@Test
+fun `apply should process KO, create-update customer and create-update role correctly`() {
+    // GIVEN
+    val batch = LoaderBatch(
+        id = "BATCH_1",
+        reference = ReferenceId(value = "REF0000001"),
+        fileName = "f.csv",
+        triggeredBy = "user1",
+        countryCode = CountryCode(countryCode = "FR"),
+        status = LoaderBatchStatus.RUNNING,
+        type = LoaderBatchType.CONTACTS,
+        startDate = Instant.now(),
+        endDate = null,
+        totalContacts = 3
+    )
+
+    val faultyCustomer = CustomerPayload(
+        rowNumber = 1,
+        crmData = CrmData(),
+        clsData = emptyMap(),
+        errorMessage = "SOME ERROR"
+    )
+
+    val customerToCreate = CustomerPayload(
+        rowNumber = 2,
+        crmData = CrmData(
+            salesforceContactId = "CONTACT123",
+            salesforceRoleId = "ROLE123"
+        ),
+        clsData = emptyMap(),
+        errorMessage = null
+    )
+
+    val customerToUpdate = CustomerPayload(
+        rowNumber = 3,
+        crmData = CrmData(
+            salesforceContactId = "CONTACT456",
+            contactRole = "ROLE_DRIVER",
+            salesforceAccountId = "ACC_789",
+            mainContact = true
+        ),
+        clsData = emptyMap(),
+        errorMessage = null
+    )
+
+    val slotEvents = mutableListOf<RecordStepEvent>()
+    every { recordStepEventRepositorySpi.save(recordStepEvent = capture(slotEvents)) } answers { firstArg() }
+
+    every { crmCustomerProviderSpi.createCrmCustomer(any()) } returns CrmCustomerResponsePayLoad(
+        crmStatus = RecordStepStatus.OK,
+        crmMessage = "Customer created",
+        crmAccountId = "ACC123",
+        crmRoleId = null
+    )
+
+    every { crmCustomerProviderSpi.updateCrmCustomer(any()) } returns CrmCustomerResponsePayLoad(
+        crmStatus = RecordStepStatus.OK,
+        crmMessage = "Customer updated",
+        crmAccountId = "ACC789",
+        crmRoleId = null
+    )
+
+    every { crmCustomerProviderSpi.createCrmRole(any()) } returns CrmRoleResponsePayLoad(
+        crmStatus = RecordStepStatus.OK,
+        crmMessage = "Role created",
+        crmRoleId = "ROLE001"
+    )
+
+    every { crmCustomerProviderSpi.updateCrmRole(any()) } returns CrmRoleResponsePayLoad(
+        crmStatus = RecordStepStatus.OK,
+        crmMessage = "Role updated",
+        crmRoleId = "ROLE002"
+    )
+
+    // WHEN
+    sut.apply(batch, personalAccounts = listOf(faultyCustomer, customerToCreate, customerToUpdate))
+
+    // THEN
+    // Vérifie qu’un event KO a bien été enregistré pour le customer avec erreur
+    assertTrue(
+        slotEvents.any {
+            it.stepStatus == RecordStepStatus.KO && it.stepMessage == "SOME ERROR"
+        },
+        "Expected a KO event for faulty customer"
+    )
+
+    // Vérifie que les appels CRM ont bien été effectués
+    verify(exactly = 1) { crmCustomerProviderSpi.createCrmCustomer(any()) }
+    verify(exactly = 1) { crmCustomerProviderSpi.updateCrmCustomer(any()) }
+    verify(exactly = 1) { crmCustomerProviderSpi.createCrmRole(any()) }
+    verify(exactly = 1) { crmCustomerProviderSpi.updateCrmRole(any()) }
+
+    // Vérifie que la sauvegarde BLM a été faite plusieurs fois
+    verify(atLeast = 1) { crmClsCustomerDataRepositorySpi.save(any()) }
+    verify(atLeast = 1) { batchRepositorySpi.save(any()) }
+
+    // Vérifie que tous les events (KO + OK) ont été persistés
+    assertTrue(slotEvents.isNotEmpty(), "Expected at least one RecordStepEvent saved")
+}
