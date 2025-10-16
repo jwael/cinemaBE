@@ -1,0 +1,52 @@
+@Test
+fun `updateCrmRole is called`() {
+    // GIVEN
+    val batch = LoaderBatch(
+        id = "BATCH_4",
+        reference = ReferenceId("REF0045678"),
+        fileName = "file.csv",
+        triggeredBy = "user1",
+        countryCode = CountryCode("FR"),
+        status = LoaderBatchStatus.RUNNING,
+        type = LoaderBatchType.CONTACTS,
+        startDate = Instant.now(),
+        endDate = null,
+        totalContacts = 1
+    )
+
+    // Customer avec un rôle existant => update
+    val customerPayload = CustomerPayload(
+        rowNumber = 4,
+        crmData = CrmData(
+            salesforceContactId = "CONTACT456",
+            salesforceRoleId = "ROLE123",
+            contactRole = "ROLE_DRIVER",
+            salesforceAccountId = "ACC456",
+            mainContact = true
+        ),
+        clsData = emptyMap(),
+        errorMessage = null
+    )
+
+    val slotEvent = slot<RecordStepEvent>()
+
+    // Capture le RecordStepEvent créé
+    every { recordStepEventRepositorySpi.save(recordStepEvent = capture(slotEvent)) } answers { firstArg() }
+
+    // Simule la réponse CRM
+    every { crmCustomerProviderSpi.updateCrmRole(any()) } returns CrmRoleResponsePayload(
+        crmStatus = RecordStepStatus.OK,
+        crmMessage = "Role updated",
+        crmRoleId = "ROLE123"
+    )
+
+    // WHEN
+    sut.apply(batch, listOf(customerPayload))
+
+    // THEN
+    verify(exactly = 1) { crmCustomerProviderSpi.updateCrmRole(any()) }
+
+    // Le stepMessage doit refléter l'ID du rôle mis à jour
+    assertEquals("Salesforce Role ID: ROLE123", slotEvent.captured.stepMessage)
+    assertEquals(RecordStepStatus.OK, slotEvent.captured.stepStatus)
+}
