@@ -1,0 +1,220 @@
+import io.mockk.*
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
+import java.time.LocalDateTime
+
+class CustomerProcessorTest {
+
+    private lateinit var customerProcessor: CustomerProcessor
+    private lateinit var recordStepEventRepositorySpi: RecordStepEventRepositorySpi
+    private lateinit var clockProvider: ClockProvider
+    private lateinit var logger: Logger
+
+    @BeforeEach
+    fun setUp() {
+        recordStepEventRepositorySpi = mockk()
+        clockProvider = mockk()
+        logger = mockk()
+        
+        customerProcessor = CustomerProcessor(
+            recordStepEventRepositorySpi = recordStepEventRepositorySpi,
+            clockProvider = clockProvider,
+            logger = logger
+        )
+    }
+
+    @Test
+    fun `apply should process personal accounts successfully`() {
+        // Given
+        val batch = LoaderBatch(id = 1L)
+        val personalAccount = CustomerPayload(errorMessage = null, rowNumber = 1)
+        val crmData = CrmClsCustomerData()
+
+        every { createCrmClsCustomerData(any(), any()) } returns crmData
+        every { processCustomerSavingInBlmStep(any()) } returns crmData
+        every { crmData.isCreateRole() } returns true
+        every { processRoleCreationInCrmStep(any()) } just Runs
+        every { updateBatchStatus(any()) } just Runs
+
+        // When
+        customerProcessor.apply(batch, listOf(personalAccount))
+
+        // Then
+        verify { processRoleCreationInCrmStep(any()) }
+        verify(exactly = 0) { recordStepEventRepositorySpi.save(any()) }
+    }
+
+    @Test
+    fun `apply should throw exception when personal account has error message`() {
+        // Given
+        val batch = LoaderBatch(id = 1L)
+        val personalAccount = CustomerPayload(errorMessage = "Invalid data", rowNumber = 1)
+        val now = LocalDateTime.now()
+
+        every { clockProvider.now() } returns now
+        every { logger.error(any()) } just Runs
+        every { recordStepEventRepositorySpi.save(any()) } just Runs
+        every { updateBatchStatus(any()) } just Runs
+
+        // When
+        customerProcessor.apply(batch, listOf(personalAccount))
+
+        // Then
+        verify { 
+            logger.error("Invalid data")
+            recordStepEventRepositorySpi.save(
+                match {
+                    it.batchId == 1L &&
+                    it.rowNumber == 1 &&
+                    it.stepName == "BLM" &&
+                    it.stepStatus == "KO" &&
+                    it.stepMessage == "Invalid data"
+                }
+            )
+        }
+    }
+
+    @Test
+    fun `apply should handle create role scenario`() {
+        // Given
+        val batch = LoaderBatch(id = 1L)
+        val personalAccount = CustomerPayload(errorMessage = null, rowNumber = 1)
+        val crmData = CrmClsCustomerData()
+
+        every { createCrmClsCustomerData(any(), any()) } returns crmData
+        every { processCustomerSavingInBlmStep(any()) } returns crmData
+        every { crmData.isCreateRole() } returns true
+        every { processRoleCreationInCrmStep(any()) } just Runs
+        every { updateBatchStatus(any()) } just Runs
+
+        // When
+        customerProcessor.apply(batch, listOf(personalAccount))
+
+        // Then
+        verify { processRoleCreationInCrmStep(crmData) }
+        verify(exactly = 0) { processRoleUpdateInCrmStep(any()) }
+        verify(exactly = 0) { processCustomerUpdateInCrmStep(any()) }
+        verify(exactly = 0) { processCustomerCreationInCrmStep(any()) }
+    }
+
+    @Test
+    fun `apply should handle update role scenario`() {
+        // Given
+        val batch = LoaderBatch(id = 1L)
+        val personalAccount = CustomerPayload(errorMessage = null, rowNumber = 1)
+        val crmData = CrmClsCustomerData()
+
+        every { createCrmClsCustomerData(any(), any()) } returns crmData
+        every { processCustomerSavingInBlmStep(any()) } returns crmData
+        every { crmData.isUpdateRole() } returns true
+        every { crmData.isCreateRole() } returns false
+        every { crmData.isCrmUpdate() } returns false
+        every { processRoleUpdateInCrmStep(any()) } just Runs
+        every { updateBatchStatus(any()) } just Runs
+
+        // When
+        customerProcessor.apply(batch, listOf(personalAccount))
+
+        // Then
+        verify { processRoleUpdateInCrmStep(crmData) }
+    }
+
+    @Test
+    fun `apply should handle crm update scenario`() {
+        // Given
+        val batch = LoaderBatch(id = 1L)
+        val personalAccount = CustomerPayload(errorMessage = null, rowNumber = 1)
+        val crmData = CrmClsCustomerData()
+
+        every { createCrmClsCustomerData(any(), any()) } returns crmData
+        every { processCustomerSavingInBlmStep(any()) } returns crmData
+        every { crmData.isCrmUpdate() } returns true
+        every { crmData.isCreateRole() } returns false
+        every { crmData.isUpdateRole() } returns false
+        every { processCustomerUpdateInCrmStep(any()) } just Runs
+        every { updateBatchStatus(any()) } just Runs
+
+        // When
+        customerProcessor.apply(batch, listOf(personalAccount))
+
+        // Then
+        verify { processCustomerUpdateInCrmStep(crmData) }
+    }
+
+    @Test
+    fun `apply should handle customer creation scenario`() {
+        // Given
+        val batch = LoaderBatch(id = 1L)
+        val personalAccount = CustomerPayload(errorMessage = null, rowNumber = 1)
+        val crmData = CrmClsCustomerData()
+
+        every { createCrmClsCustomerData(any(), any()) } returns crmData
+        every { processCustomerSavingInBlmStep(any()) } returns crmData
+        every { crmData.isCreateRole() } returns false
+        every { crmData.isUpdateRole() } returns false
+        every { crmData.isCrmUpdate() } returns false
+        every { processCustomerCreationInCrmStep(any()) } just Runs
+        every { updateBatchStatus(any()) } just Runs
+
+        // When
+        customerProcessor.apply(batch, listOf(personalAccount))
+
+        // Then
+        verify { processCustomerCreationInCrmStep(crmData) }
+    }
+
+    @Test
+    fun `apply should process multiple personal accounts`() {
+        // Given
+        val batch = LoaderBatch(id = 1L)
+        val personalAccount1 = CustomerPayload(errorMessage = null, rowNumber = 1)
+        val personalAccount2 = CustomerPayload(errorMessage = null, rowNumber = 2)
+        val crmData = CrmClsCustomerData()
+
+        every { createCrmClsCustomerData(any(), any()) } returns crmData
+        every { processCustomerSavingInBlmStep(any()) } returns crmData
+        every { crmData.isCreateRole() } returns true
+        every { processRoleCreationInCrmStep(any()) } just Runs
+        every { updateBatchStatus(any()) } just Runs
+
+        // When
+        customerProcessor.apply(batch, listOf(personalAccount1, personalAccount2))
+
+        // Then
+        verify(exactly = 2) { processRoleCreationInCrmStep(any()) }
+    }
+
+    @Test
+    fun `apply should call updateBatchStatus at the end`() {
+        // Given
+        val batch = LoaderBatch(id = 1L)
+        val personalAccount = CustomerPayload(errorMessage = null, rowNumber = 1)
+        val crmData = CrmClsCustomerData()
+
+        every { createCrmClsCustomerData(any(), any()) } returns crmData
+        every { processCustomerSavingInBlmStep(any()) } returns crmData
+        every { crmData.isCreateRole() } returns true
+        every { processRoleCreationInCrmStep(any()) } just Runs
+        every { updateBatchStatus(any()) } just Runs
+
+        // When
+        customerProcessor.apply(batch, listOf(personalAccount))
+
+        // Then
+        verify { updateBatchStatus(batch) }
+    }
+}
+
+// Classes de test supplémentaires
+class TestClockProvider(private val fixedTime: LocalDateTime) : ClockProvider {
+    override fun now(): LocalDateTime = fixedTime
+}
+
+class TestLogger : Logger {
+    val errorMessages = mutableListOf<String?>()
+    
+    override fun error(message: String?) {
+        errorMessages.add(message)
+    }
+}
