@@ -1,0 +1,52 @@
+@Test
+fun `createCrmRole is called`() {
+    // GIVEN: un batch et un customer qui déclenche la création de rôle
+    val batch = LoaderBatch(
+        id = "BATCH_3",
+        reference = ReferenceId(value = "REF0038711"),
+        fileName = "file.csv",
+        triggeredBy = "user1",
+        countryCode = CountryCode(countryCode = "FR"),
+        status = LoaderBatchStatus.RUNNING,
+        type = LoaderBatchType.CONTACTS,
+        startDate = Instant.now(),
+        endDate = null,
+        totalContacts = 1
+    )
+
+    // Ce payload doit avoir tous les champs de rôle null pour isCreateRole() == true
+    val customerPayload = CustomerPayload(
+        rowNumber = 1,
+        crmData = CrmData(
+            salesforceContactId = null,
+            salesforceRoleId = null,
+            contactRole = null,
+            salesforceAccountId = null,
+            mainContact = null
+        ),
+        clsData = emptyMap(),
+        errorMessage = null
+    )
+
+    // Capture des events
+    val slotEvents = mutableListOf<RecordStepEvent>()
+    every { recordStepEventRepositorySpi.save(recordStepEvent = capture(slotEvents)) } answers { firstArg() }
+
+    // Mock du CRM Provider
+    every { crmCustomerProviderSpi.createCrmRole(crmRoleData = any()) } returns CrmRoleResponsePayload(
+        crmStatus = RecordStepStatus.OK,
+        crmMessage = "Role created",
+        crmRoleId = "ROLE001"
+    )
+
+    // WHEN: on applique le batch
+    sut.apply(batch, personalAccounts = listOf(customerPayload))
+
+    // THEN: createCrmRole doit être appelé exactement 1 fois
+    verify(exactly = 1) { crmCustomerProviderSpi.createCrmRole(crmRoleData = any()) }
+
+    // Optionnel: vérifier le message de l'event
+    val createdEvent = slotEvents.firstOrNull { it.stepMessage == "Role created" }
+    assertNotNull(createdEvent, "Expected a Role created event")
+    assertEquals(RecordStepStatus.OK, createdEvent.stepStatus)
+}
