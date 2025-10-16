@@ -1,0 +1,55 @@
+@Test
+fun `createCrmRole is called when isCreateRole is true`() {
+    // GIVEN
+    val batch = LoaderBatch(
+        id = "BATCH_3",
+        reference = ReferenceId(value = "REF0038711"),
+        fileName = "file.csv",
+        triggeredBy = "user1",
+        countryCode = CountryCode(countryCode = "FR"),
+        status = LoaderBatchStatus.RUNNING,
+        type = LoaderBatchType.CONTACTS,
+        startDate = Instant.now(),
+        endDate = null,
+        totalContacts = 1
+    )
+
+    // Crée directement un CrmClsCustomerData avec isCreateRole = true
+    val crmClsCustomerData = CrmClsCustomerData(
+        id = "CUST100",
+        batchid = batch.id!!,
+        reconciliationId = ReconciliationId.parse("REF0038711-ROW001"),
+        rowNumber = 1,
+        rowReference = ReferenceId("ROW001"),
+        crmData = CrmData(
+            salesforceContactId = null,
+            salesforceRoleId = null,
+            contactRole = null,
+            salesforceAccountId = null,
+            mainContact = null
+        ),
+        clsData = emptyMap(),
+        crmInsertedId = null
+    )
+
+    // Capture les events
+    val slotEvent = slot<RecordStepEvent>()
+    every { recordStepEventRepositorySpi.save(recordStepEvent = capture(slotEvent)) } answers { firstArg() }
+
+    // Mock du provider CRM pour la création de rôle
+    every { crmCustomerProviderSpi.createCrmRole(crmRoleData = any()) } returns CrmRoleResponsePayload(
+        crmStatus = RecordStepStatus.OK,
+        crmMessage = "Role created",
+        crmRoleId = "ROLE001"
+    )
+
+    // WHEN
+    sut.processRoleCreationInCrmStep(crmClsCustomerData)
+
+    // THEN
+    verify(exactly = 1) { crmCustomerProviderSpi.createCrmRole(crmRoleData = any()) }
+
+    // Vérifie l'event enregistré
+    assertEquals("Role created", slotEvent.captured.stepMessage)
+    assertEquals(RecordStepStatus.OK, slotEvent.captured.stepStatus)
+}
