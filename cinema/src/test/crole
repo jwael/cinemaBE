@@ -1,0 +1,63 @@
+import kotlin.test.*
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+
+class CrmRoleDataTest {
+
+    private lateinit var crmRoleData: CrmRoleData
+    private val reconciliationId = object {
+        val printo = "RECONC001"
+    }
+    private val dateFormatter: DateTimeFormatter = DateTimeFormatter.ISO_DATE
+
+    @BeforeEach
+    fun setup() {
+        crmRoleData = CrmRoleData(
+            startDate = LocalDate.of(2025, 10, 16),
+            endDate = LocalDate.of(2025, 12, 31),
+            contactRole = "ROLE_DRIVER",
+            кусТуре = "CUSTOM",
+            authorizedSignature = true,
+            salesforceAccountId = "ACC123",
+            mainContact = true,
+            roleClsCompanyCode = "EXT001",
+            companyCode = "COMP001",
+            sfRelatedAccount = "REL001"
+        )
+    }
+
+    @Test
+    fun `toCrmCustomerRoleRequest should map fields correctly`() {
+        val request = crmRoleData.toCrmCustomerRoleRequest(reconciliationId)
+
+        assertEquals("RECONC001", request.correlationId)
+        assertNotNull(request.data.roles)
+        assertEquals(1, request.data.roles!!.size)
+
+        val role = request.data.roles!![0]
+        assertEquals("2025-10-16", role.startDate)
+        assertEquals("2025-12-31", role.endDate)
+        assertEquals("ROLE_DRIVER", role.roleCode)
+        assertEquals("CUSTOM", role.кусТуре)
+        assertEquals(true, role.authorizedSignature)
+        assertEquals("ACC123", role.relatedAccountId)
+        assertEquals(true, role.isMainContact)
+    }
+
+    @Test
+    fun `toCrmCustomerRoleUpdateRequest should map fields correctly`() {
+        val updateRequest = crmRoleData.toCrmCustomerRoleUpdateRequest(reconciliationId)
+
+        assertEquals("RECONC001", updateRequest.correlationId)
+        val role = updateRequest.data
+        assertEquals("2025-10-16", role.startDate)
+        assertEquals("2025-12-31", role.endDate)
+        assertEquals("ROLE_DRIVER", role.roleCode)
+        assertEquals("EXT001", role.accountExternalCode)
+        assertEquals("COMP001", role.relatedAccountExternalId)
+        assertEquals("REL001", role.relatedAccountId)
+        assertEquals(true, role.isMainContact)
+    }
+}
