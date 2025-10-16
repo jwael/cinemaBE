@@ -1,0 +1,136 @@
+@ExtendWith(MockKExtension::class)
+class ImportCustomersServiceTest {
+
+    // === MOCKS ===
+    private val crmCustomerProviderSpi: CrmCustomerProviderSpi = mockk(relaxed = true)
+    private val recordStepEventRepositorySpi: RecordStepEventRepositorySpi = mockk(relaxed = true)
+    private val batchRepositorySpi: BatchRepositoryForCustomersSpi = mockk(relaxed = true)
+    private val crmClsCustomerDataRepositorySpi: CrmClsCustomerDataRepositorySpi = mockk(relaxed = true)
+    private val clockProvider: ClockProvider = mockk { every { now() } returns Instant.now() }
+
+    // === SYSTEM UNDER TEST ===
+    private val sut = ImportCustomersService(
+        crmCustomerProviderSpi = crmCustomerProviderSpi,
+        recordStepEventRepositorySpi = recordStepEventRepositorySpi,
+        batchRepositorySpi = batchRepositorySpi,
+        crmClsCustomerDataRepositorySpi = crmClsCustomerDataRepositorySpi,
+        clockProvider = clockProvider
+    )
+
+    private val batch = LoaderBatch(
+        id = "BATCH_1",
+        reference = ReferenceId("REF0000001"),
+        fileName = "f.csv",
+        triggeredBy = "user1",
+        countryCode = CountryCode("FR"),
+        status = LoaderBatchStatus.RUNNING,
+        type = LoaderBatchType.CONTACTS,
+        startDate = Instant.now(),
+        endDate = null,
+        totalContacts = 3
+    )
+
+    // =========================================================================================
+    // 1️⃣ TEST - CAS KO : erreur dans le customer (errorMessage non nul)
+    // =========================================================================================
+    @Test
+    fun `should record KO event when customer has errorMessage`() {
+        // GIVEN
+        val faultyCustomer = CustomerPayload(
+            rowNumber = 1,
+            crmData = CrmData(
+                salesforceContactId = null,
+                salesforceRoleId = null,
+                contactRole = null
+            ),
+            clsData = emptyMap(),
+            errorMessage = "SOME ERROR"
+        )
+
+        // WHEN
+        sut.apply(batch, listOf(faultyCustomer))
+
+        // THEN
+        verify { recordStepEventRepositorySpi.save(match {
+            it.stepStatus == RecordStepStatus.KO &&
+            it.stepMessage == "SOME ERROR"
+        }) }
+
+        verify(exactly = 0) { crmCustomerProviderSpi.createCrmCustomer(any()) }
+        verify(exactly = 0) { crmCustomerProviderSpi.updateCrmCustomer(any()) }
+        verify(exactly = 0) { crmCustomerProviderSpi.createCrmRole(any()) }
+        verify(exactly = 0) { crmCustomerProviderSpi.updateCrmRole(any()) }
+    }
+
+    // =========================================================================================
+    // 2️⃣ TEST - CAS OK : création + mise à jour de customer et de role
+    // =========================================================================================
+    @Test
+    fun `should create and update customers and roles correctly`() {
+        // GIVEN
+        val customerToCreate = CustomerPayload(
+            rowNumber = 2,
+            crmData = CrmData(
+                salesforceContactId = null,
+                salesforceRoleId = null,
+                contactRole = "ROLE_DRIVER",
+                salesforceAccountId = null,
+                mainContact = true
+            ),
+            clsData = emptyMap(),
+            errorMessage = null
+        )
+
+        val customerToUpdate = CustomerPayload(
+            rowNumber = 3,
+            crmData = CrmData(
+                salesforceContactId = "CONTACT123",
+                salesforceRoleId = "ROLE001",
+                contactRole = "ROLE_DRIVER",
+                salesforceAccountId = "ACC_123",
+                mainContact = true
+            ),
+            clsData = emptyMap(),
+            errorMessage = null
+        )
+
+        every { crmCustomerProviderSpi.createCrmCustomer(any()) } returns CrmCustomerResponsePayload(
+            crmStatus = RecordStepStatus.OK,
+            crmMessage = "Customer created",
+            crmAccountId = "ACC_123",
+            crmRoleId = null
+        )
+
+        every { crmCustomerProviderSpi.updateCrmCustomer(any()) } returns CrmCustomerResponsePayload(
+            crmStatus = RecordStepStatus.OK,
+            crmMessage = "Customer updated",
+            crmAccountId = "ACC_123",
+            crmRoleId = null
+        )
+
+        every { crmCustomerProviderSpi.createCrmRole(any()) } returns CrmRoleResponsePayload(
+            crmStatus = RecordStepStatus.OK,
+            crmMessage = "Role created",
+            crmRoleId = "ROLE_001"
+        )
+
+        every { crmCustomerProviderSpi.updateCrmRole(any()) } returns CrmRoleResponsePayload(
+            crmStatus = RecordStepStatus.OK,
+            crmMessage = "Role updated",
+            crmRoleId = "ROLE_002"
+        )
+
+        val customers = listOf(customerToCreate, customerToUpdate)
+
+        // WHEN
+        sut.apply(batch, customers)
+
+        // THEN
+        verify(exactly = 1) { crmCustomerProviderSpi.createCrmCustomer(any()) }
+        verify(exactly = 1) { crmCustomerProviderSpi.updateCrmCustomer(any()) }
+        verify(exactly = 1) { crmCustomerProviderSpi.createCrmRole(any()) }
+        verify(exactly = 1) { crmCustomerProviderSpi.updateCrmRole(any()) }
+
+        verify(atLeast = 1) { recordStepEventRepositorySpi.save(any()) }
+    }
+}
