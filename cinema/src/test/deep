@@ -1,0 +1,143 @@
+import java.time.Clock
+
+class CustomerProcessor(
+    private val recordStepEventRepositorySpi: RecordStepEventRepositorySpi,
+    private val clockProvider: ClockProvider,
+    private val logger: Logger
+) {
+    
+    fun apply(batch: LoaderBatch, personalAccounts: List<CustomerPayload>) {
+        personalAccounts.forEach { personalAccount ->
+            try {
+                processPersonalAccount(batch, personalAccount)
+            } catch (e: Exception) {
+                handleProcessingError(batch, personalAccount, e)
+            }
+        }
+        updateBatchStatus(batch)
+    }
+
+    private fun processPersonalAccount(batch: LoaderBatch, personalAccount: CustomerPayload) {
+        // Vérification des erreurs
+        if (!personalAccount.errorMessage.isNullOrBlank()) {
+            throw Exception("${personalAccount.errorMessage}")
+        }
+
+        // Création des données CRM
+        val crmClsCustomerData = createCrmClsCustomerData(
+            loaderBatch = batch,
+            personalAccount = personalAccount
+        )
+
+        // Sauvegarde dans BLM
+        val savedCrmClsCustomerData = processCustomerSavingInBlmStep(crmClsCustomerData = crmClsCustomerData)
+
+        // Traitement selon le type d'opération
+        when {
+            savedCrmClsCustomerData.isCreateRole() -> {
+                // SF_ROLE_CREATE
+                processRoleCreationInCrmStep(crmClsCustomerData = savedCrmClsCustomerData)
+            }
+            savedCrmClsCustomerData.isUpdateRole() -> {
+                // SF_ROLE_UPDATE
+                processRoleUpdateInCrmStep(crmClsCustomerData = savedCrmClsCustomerData)
+            }
+            savedCrmClsCustomerData.isCrmUpdate() -> {
+                // SF_UPDATE
+                processCustomerUpdateInCrmStep(crmClsCustomerData = savedCrmClsCustomerData)
+            }
+            else -> {
+                // SF_CREATE
+                processCustomerCreationInCrmStep(crmClsCustomerData = savedCrmClsCustomerData)
+            }
+        }
+    }
+
+    private fun handleProcessingError(batch: LoaderBatch, personalAccount: CustomerPayload, e: Exception) {
+        logger.error(e.message)
+        
+        recordStepEventRepositorySpi.save(
+            RecordStepEvent(
+                batchId = batch.id!!,
+                rowNumber = personalAccount.rowNumber,
+                reconciliationId = null,
+                stepName = "BLM",
+                stepStatus = "KO",
+                stepMessage = e.message,
+                timestamp = clockProvider.now()
+            )
+        )
+    }
+
+    // Méthodes à implémenter selon votre logique métier
+    private fun createCrmClsCustomerData(loaderBatch: LoaderBatch, personalAccount: CustomerPayload): CrmClsCustomerData {
+        // Implémentation à fournir
+        TODO("Implémenter la création des données CRM")
+    }
+
+    private fun processCustomerSavingInBlmStep(crmClsCustomerData: CrmClsCustomerData): CrmClsCustomerData {
+        // Implémentation à fournir
+        TODO("Implémenter la sauvegarde BLM")
+    }
+
+    private fun processRoleCreationInCrmStep(crmClsCustomerData: CrmClsCustomerData) {
+        // Implémentation à fournir
+        TODO("Implémenter la création de rôle CRM")
+    }
+
+    private fun processRoleUpdateInCrmStep(crmClsCustomerData: CrmClsCustomerData) {
+        // Implémentation à fournir
+        TODO("Implémenter la mise à jour de rôle CRM")
+    }
+
+    private fun processCustomerUpdateInCrmStep(crmClsCustomerData: CrmClsCustomerData) {
+        // Implémentation à fournir
+        TODO("Implémenter la mise à jour client CRM")
+    }
+
+    private fun processCustomerCreationInCrmStep(crmClsCustomerData: CrmClsCustomerData) {
+        // Implémentation à fournir
+        TODO("Implémenter la création client CRM")
+    }
+
+    private fun updateBatchStatus(batch: LoaderBatch) {
+        // Implémentation à fournir
+        TODO("Implémenter la mise à jour du statut du batch")
+    }
+}
+
+// Interfaces et classes nécessaires (à adapter selon votre projet)
+interface RecordStepEventRepositorySpi {
+    fun save(recordStepEvent: RecordStepEvent)
+}
+
+interface ClockProvider {
+    fun now(): java.time.LocalDateTime
+}
+
+data class RecordStepEvent(
+    val batchId: Long,
+    val rowNumber: Int,
+    val reconciliationId: String?,
+    val stepName: String,
+    val stepStatus: String,
+    val stepMessage: String?,
+    val timestamp: java.time.LocalDateTime
+)
+
+data class LoaderBatch(val id: Long?)
+data class CustomerPayload(
+    val errorMessage: String?,
+    val rowNumber: Int
+    // autres propriétés...
+)
+
+class CrmClsCustomerData {
+    fun isCreateRole(): Boolean = TODO()
+    fun isUpdateRole(): Boolean = TODO()
+    fun isCrmUpdate(): Boolean = TODO()
+}
+
+interface Logger {
+    fun error(message: String?)
+}
