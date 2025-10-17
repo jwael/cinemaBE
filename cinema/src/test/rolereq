@@ -1,0 +1,36 @@
+@ParameterizedTest
+@CsvSource(
+    value = [
+        "2025-01-01,2025-12-31,ROLE_DRIVER,true,STANDARD",
+        "2024-03-01,2024-09-30,ROLE_MANAGER,false,PREMIUM"
+    ]
+)
+fun `should map fields correctly with params`(
+    startDate: String,
+    endDate: String,
+    roleCode: String,
+    authorizedSignature: Boolean,
+    kycType: String
+) {
+    // GIVEN
+    val crmRoleData = CrmRoleData(
+        crmCustomerData = CrmCustomerData(
+            startDate = LocalDate.parse(startDate),
+            endDate = LocalDate.parse(endDate),
+            contactRole = roleCode,
+            authorizedSignature = authorizedSignature,
+            kycType = kycType
+        )
+    )
+
+    // WHEN
+    val request = crmRoleData.toCrmCustomerRoleRequest()
+    val role = request.data.roles!!.first()
+
+    // THEN
+    assertEquals(startDate, role.startDate)
+    assertEquals(endDate, role.endDate)
+    assertEquals(roleCode, role.roleCode)
+    assertEquals(authorizedSignature, role.authorizedSignature)
+    assertEquals(kycType, role.kycType)
+}
