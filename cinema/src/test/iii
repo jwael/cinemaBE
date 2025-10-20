@@ -1,0 +1,68 @@
+import io.mockk.every
+import io.mockk.mockk
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
+import retrofit2.Response
+import kotlin.test.assertEquals
+
+class CrmCustomerProviderAdapterTest {
+
+    private val crmClient = mockk<CrmClient>()
+    private val adapter = CrmCustomerProviderAdapter(crmClient)
+
+    @ParameterizedTest
+    @CsvSource(
+        "CONTACT123, null, ROLE001, OK",
+        "CONTACT456, null, ROLE002, KO",
+        "CONTACT789, null, ROLE003, WARNING"
+    )
+    fun `should create CRM role correctly`(
+        contactId: String,
+        roleIdInput: String?,
+        roleIdExpected: String?,
+        expectedStatus: String
+    ) {
+        // GIVEN: crmRoleData minimal
+        val crmRoleData = CrmRoleData(
+            crmCustomerData = CrmData(
+                salesforceContactId = contactId,
+                salesforceRoleId = roleIdInput
+            ),
+            reconciliationId = ReconciliationId(
+                batchReference = ReferenceId("REF1230001"),
+                rowReference = ReferenceId("ROW001")
+            ),
+            batchId = "BATCH1230001",
+            rowNumber = 2
+        )
+
+        // GIVEN: mock du retour du client directement en Response<T>
+        val mockResponse = Response.success(
+            RolesResponse(
+                roles = listOf(
+                    RoleResponse(
+                        status = expectedStatus,
+                        message = "Some message",
+                        roleId = roleIdExpected
+                    )
+                )
+            )
+        )
+
+        // Mock direct du client pour retourner le Response<T>
+        every {
+            crmClient.createRole(
+                correlationId = any(),
+                contactid = any(),
+                roleRequest = any()
+            )
+        } returns mockResponse
+
+        // WHEN
+        val result = adapter.createCrmRole(crmRoleData)
+
+        // THEN
+        assertEquals(expectedStatus, result.crmStatus.name)
+        assertEquals(roleIdExpected, result.crmRoleId)
+    }
+}
