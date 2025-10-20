@@ -1,0 +1,34 @@
+// Supposons que la signature réelle soit :
+// fun createRole(correlationId: String, contactId: String, roleRequest: CrmRoleRequestData): Call<RolesResponse>
+
+val crmRoleData = CrmRoleData(
+    crmCustomerData = CrmData(
+        salesforceContactId = "CONTACT123",
+        salesforceRoleId = null
+    ),
+    reconciliationId = ReconciliationId(
+        batchReference = ReferenceId(value = "REF0010011"),
+        rowReference = ReferenceId(value = "ROW001")
+    ),
+    batchId = "BATCH1212",
+    rowNumber = 2
+)
+
+val crmClient = mockk<CrmClient>()
+val adapter = CrmCustomerProviderAdapter(crmClient)
+
+// Mocker correctement le type attendu
+val mockResponse = mockk<Response<RolesResponse>>()
+every { mockResponse.isSuccessful } returns true
+every { mockResponse.body() } returns RolesResponse(
+    status = "OK",
+    message = "Role created",
+    roleId = "ROLE001"
+)
+
+every { crmClient.createRole(any(), any(), any()).execute() } returns mockResponse
+
+val result = adapter.createCrmRole(crmRoleData)
+
+assertThat(result.crmStatus).isEqualTo(RecordStepStatus.OK)
+assertThat(result.crmRoleId).isEqualTo("ROLE001")
