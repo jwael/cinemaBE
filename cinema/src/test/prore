@@ -1,0 +1,32 @@
+@Test
+fun `should create CRM role correctly`() {
+    val roleIdExpected = "ROLE001"
+    val crmRoleData = CrmRoleData(
+        crmCustomerData = CrmData(salesforceContactId = "CONTACT123", salesforceRoleId = null),
+        reconciliationId = ReconciliationId(batchReference = ReferenceId("REF0010011"), rowReference = ReferenceId("ROW001")),
+        batchId = "BATCH1212",
+        rowNumber = 2,
+        crmContactData = CrmData()
+    )
+
+    // GIVEN: mock du client pour renvoyer Response sur .execute()
+    val mockCall = mockk<Call<RolesResponse>>()
+    val mockResponse = Response.success(
+        RolesResponse(
+            roles = listOf(
+                RoleResponse(status = "OK", message = "Role created", roleId = roleIdExpected)
+            )
+        )
+    )
+
+    every { crmClient.createRole(any(), any(), any()) } returns mockCall
+    every { mockCall.execute() } returns mockResponse
+
+    // WHEN
+    val result = adapter.createCrmRole(crmRoleData)
+
+    // THEN
+    assertEquals(RecordStepStatus.OK, result.crmStatus)
+    assertEquals(roleIdExpected, result.crmRoleId)
+    verify(exactly = 1) { crmClient.createRole(any(), any(), any()) }
+}
