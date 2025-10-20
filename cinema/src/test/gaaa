@@ -1,0 +1,34 @@
+@Test
+fun `should create CRM role correctly without mocking Call`() {
+    val crmRoleData = CrmRoleData(
+        crmCustomerData = CrmData(salesforceContactId = "CONTACT123", salesforceRoleId = null),
+        reconciliationId = ReconciliationId(batchReference = ReferenceId("REF0010011"), rowReference = ReferenceId("ROW001")),
+        batchId = "BATCH1212",
+        rowNumber = 2,
+        crmContactData = CrmData()
+    )
+
+    val expectedRoleId = "ROLE001"
+
+    // GIVEN: mock du client directement pour renvoyer Response
+    every {
+        crmClient.createRole(any(), any(), any())
+    } answers {
+        // Ici on renvoie directement un Response.success(), pas de Call
+        Response.success(
+            RolesResponse(
+                roles = listOf(
+                    RoleResponse(status = "OK", message = "Role created", roleId = expectedRoleId)
+                )
+            )
+        )
+    }
+
+    // WHEN
+    val result = adapter.createCrmRole(crmRoleData)
+
+    // THEN
+    assertEquals(RecordStepStatus.OK, result.crmStatus)
+    assertEquals(expectedRoleId, result.crmRoleId)
+    verify(exactly = 1) { crmClient.createRole(any(), any(), any()) }
+}
