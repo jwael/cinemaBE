@@ -1,0 +1,38 @@
+@Test
+fun `createCrmRole should return OK when CRM client responds successfully`() {
+    // GIVEN
+    val crmRoleData = CrmRoleData(
+        crmCustomerData = CrmData(
+            salesforceContactId = "CONTACT123",
+            salesforceRoleId = null
+        ),
+        reconciliationId = ReconciliationId(
+            batchReference = ReferenceId("REF0010011"),
+            rowReference = ReferenceId("ROW001")
+        ),
+        batchId = "BATCH1212",
+        rowNumber = 2
+    )
+
+    val mockResponse = Response.success(
+        CrmRoleResponsePayload(
+            crmStatus = RecordStepStatus.OK,
+            crmMessage = "Role created",
+            crmRoleId = "ROLE001"
+        )
+    )
+
+    every { crmClient.createRole(
+        correlationId = any(),
+        contactId = any(),
+        roLeRequest = any()
+    ) } returns mockResponse
+
+    // WHEN
+    val result = crmCustomerProviderAdapter.createCrmRole(crmRoleData)
+
+    // THEN
+    assertEquals(RecordStepStatus.OK, result.crmStatus)
+    assertEquals("Role created", result.crmMessage)
+    assertEquals("ROLE001", result.crmRoleId)
+}
