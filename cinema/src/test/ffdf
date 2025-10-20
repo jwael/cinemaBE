@@ -1,0 +1,171 @@
+import io.mockk.*
+import io.mockk.impl.annotations.MockK
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Nested
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
+import org.junit.jupiter.api.Test
+import retrofit2.Call
+import retrofit2.Response
+import kotlin.test.assertEquals
+
+@ExperimentalCoroutinesApi
+class CrmCustomerProviderAdapterTest {
+
+    @MockK
+    lateinit var crmClient: CrmClient
+
+    lateinit var adapter: CrmCustomerProviderAdapter
+
+    @BeforeEach
+    fun setup() {
+        MockKAnnotations.init(this, relaxed = true)
+        adapter = spyk(CrmCustomerProviderAdapter(crmClient))
+    }
+
+    @Nested
+    inner class CreateUpdateCustomer {
+
+        @Test
+        fun `should create CRM customer successfully`() {
+            val crmData = CrmClsCustomerData(
+                salesforceContactId = "CONTACT123",
+                reconciliationId = ReconciliationId(
+                    batchReference = ReferenceId("REF0010011"),
+                    rowReference = ReferenceId("ROW_1")
+                ),
+                batchId = "BATCH_1",
+                rowNumber = 1
+            )
+
+            val mockCall = mockk<Call<CrmCustomerResponsePayload>>()
+            val mockResponse = mockk<Response<CrmCustomerResponsePayload>>()
+            every { crmClient.createCustomer(any(), any()) } returns mockCall
+            every { mockCall.execute() } returns mockResponse
+            every { mockResponse.isSuccessful } returns true
+            every { mockResponse.body() } returns CrmCustomerResponsePayload(
+                crmStatus = RecordStepStatus.OK,
+                crmMessage = "Customer created",
+                crmAccountId = "ACC123",
+                crmRoleId = null
+            )
+
+            val response = adapter.createCrmCustomer(crmData)
+            assertEquals(RecordStepStatus.OK, response.crmStatus)
+            assertEquals("Customer created", response.crmMessage)
+        }
+
+        @Test
+        fun `should update CRM customer successfully`() {
+            val crmData = CrmClsCustomerData(
+                salesforceContactId = "CONTACT123",
+                salesforceAccountId = "ACC123",
+                reconciliationId = ReconciliationId(
+                    batchReference = ReferenceId("REF0010011"),
+                    rowReference = ReferenceId("ROW_1")
+                ),
+                batchId = "BATCH_1",
+                rowNumber = 1
+            )
+
+            val mockCall = mockk<Call<CrmCustomerResponsePayload>>()
+            val mockResponse = mockk<Response<CrmCustomerResponsePayload>>()
+            every { crmClient.updateCustomer(any(), any(), any()) } returns mockCall
+            every { mockCall.execute() } returns mockResponse
+            every { mockResponse.isSuccessful } returns true
+            every { mockResponse.body() } returns CrmCustomerResponsePayload(
+                crmStatus = RecordStepStatus.OK,
+                crmMessage = "Customer updated",
+                crmAccountId = "ACC123",
+                crmRoleId = null
+            )
+
+            val response = adapter.updateCrmCustomer(crmData)
+            assertEquals(RecordStepStatus.OK, response.crmStatus)
+            assertEquals("Customer updated", response.crmMessage)
+        }
+    }
+
+    @Nested
+    inner class CreateUpdateRole {
+
+        @ParameterizedTest
+        @CsvSource(
+            "OK, ROLE001",
+            "KO, null"
+        )
+        fun `should create CRM role based on status`(expectedStatus: String, roleId: String?) {
+            val crmRoleData = CrmRoleData(
+                crmCustomerData = CrmData(
+                    salesforceContactId = "CONTACT123",
+                    salesforceRoleId = null
+                ),
+                reconciliationId = ReconciliationId(
+                    batchReference = ReferenceId("REF0010011"),
+                    rowReference = ReferenceId("ROW_1")
+                ),
+                batchId = "BATCH_1",
+                rowNumber = 2
+            )
+
+            val mockCall = mockk<Call<CrmRoleResponsePayload>>()
+            val mockResponse = mockk<Response<CrmRoleResponsePayload>>()
+            every { crmClient.createRole(any(), any(), any()) } returns mockCall
+            every { mockCall.execute() } returns mockResponse
+            every { mockResponse.isSuccessful } returns true
+            every { mockResponse.body() } returns if (expectedStatus == "OK") CrmRoleResponsePayload(
+                crmStatus = RecordStepStatus.OK,
+                crmMessage = "Role created",
+                crmRoleId = roleId
+            ) else null
+
+            val response = adapter.createCrmRole(crmRoleData)
+            if (expectedStatus == "OK") {
+                assertEquals(RecordStepStatus.OK, response.crmStatus)
+                assertEquals(roleId, response.crmRoleId)
+            } else {
+                assertEquals(RecordStepStatus.KO, response.crmStatus)
+            }
+        }
+
+        @ParameterizedTest
+        @CsvSource(
+            "OK, ROLE002",
+            "KO, null"
+        )
+        fun `should update CRM role based on status`(expectedStatus: String, roleId: String?) {
+            val crmRoleData = CrmRoleData(
+                crmCustomerData = CrmData(
+                    salesforceContactId = "CONTACT123",
+                    salesforceRoleId = "ROLE001"
+                ),
+                reconciliationId = ReconciliationId(
+                    batchReference = ReferenceId("REF0010011"),
+                    rowReference = ReferenceId("ROW_2")
+                ),
+                batchId = "BATCH_1",
+                rowNumber = 2
+            )
+
+            val mockCall = mockk<Call<CrmRoleResponsePayload>>()
+            val mockResponse = mockk<Response<CrmRoleResponsePayload>>()
+            every { crmClient.updateRole(any(), any(), any(), any()) } returns mockCall
+            every { mockCall.execute() } returns mockResponse
+            every { mockResponse.isSuccessful } returns true
+            every { mockResponse.body() } returns if (expectedStatus == "OK") CrmRoleResponsePayload(
+                crmStatus = RecordStepStatus.OK,
+                crmMessage = "Role updated",
+                crmRoleId = roleId
+            ) else null
+
+            val response = adapter.updateCrmRole(crmRoleData)
+            if (expectedStatus == "OK") {
+                assertEquals(RecordStepStatus.OK, response.crmStatus)
+                assertEquals(roleId, response.crmRoleId)
+            } else {
+                assertEquals(RecordStepStatus.KO, response.crmStatus)
+            }
+        }
+    }
+}
