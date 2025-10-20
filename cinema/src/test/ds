@@ -1,0 +1,285 @@
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
+import retrofit2.Response
+import java.time.LocalDate
+import kotlin.test.assertEquals
+
+class CrmCustomerProviderAdapterRoleTest {
+
+    private val crmClient = mockk<CrmClient>()
+    private lateinit var adapter: CrmCustomerProviderAdapter
+
+    @BeforeEach
+    fun setUp() {
+        adapter = CrmCustomerProviderAdapter(crmClient)
+    }
+
+    // ==================== TESTS PARAMÉTRÉS POUR createCrmRole ====================
+
+    @ParameterizedTest
+    @CsvSource(
+        // roleType, startDate, endDate, expectedRoleId, expectedStatus
+        "PARTNER, 2024-01-01, 2024-12-31, ROLE_PARTNER_123, OK",
+        "MANAGER, 2024-01-01, null, ROLE_MANAGER_456, OK",
+        "ADMIN, 2024-01-01, 2024-06-30, ROLE_ADMIN_789, OK",
+        "USER, null, null, ROLE_USER_999, OK"
+    )
+    fun `createCrmRole with successful response should return correct payload`(
+        roleType: String,
+        startDate: String?,
+        endDate: String?,
+        expectedRoleId: String,
+        expectedStatus: String
+    ) {
+        // Given
+        val roleData = createCrmRoleData(
+            roleType = roleType,
+            startDate = startDate?.let { LocalDate.parse(it) },
+            endDate = endDate?.let { LocalDate.parse(it) }
+        )
+        
+        val rolesResponse = RolesResponse(
+            roleId = expectedRoleId,
+            status = "SUCCESS"
+        )
+        
+        every { 
+            crmClient.createRole(
+                correlationId = match { it.contains("role") },
+                contactId = "CONTACT_123",
+                roleRequest = match { 
+                    it.roleType == roleType &&
+                    it.startDate == startDate?.let { LocalDate.parse(it) } &&
+                    it.endDate == endDate?.let { LocalDate.parse(it) }
+                }
+            ).execute() 
+        } returns Response.success(rolesResponse)
+
+        // When
+        val result = adapter.createCrmRole(roleData)
+
+        // Then
+        assertEquals(expectedRoleId, result.crmRoleId)
+        assertEquals(RecordStepStatus.valueOf(expectedStatus), result.crmStatus)
+        
+        verify { 
+            crmClient.createRole(
+                correlationId = any(),
+                contactId = "CONTACT_123",
+                roleRequest = any()
+            ).execute() 
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        // errorMessage, expectedErrorMessage
+        "Validation failed, Validation failed",
+        "Contact not found, Contact not found",
+        "Role already exists, Role already exists"
+    )
+    fun `createCrmRole with error response should return KO status`(
+        errorMessage: String,
+        expectedErrorMessage: String
+    ) {
+        // Given
+        val roleData = createCrmRoleData()
+        
+        every { 
+            crmClient.createRole(any(), any(), any()).execute() 
+        } returns Response.error(400, mockErrorResponseBody("""{"message": "$errorMessage"}"""))
+
+        // When
+        val result = adapter.createCrmRole(roleData)
+
+        // Then
+        assertEquals(RecordStepStatus.KO, result.crmStatus)
+        assertEquals(expectedErrorMessage, result.crmMessage)
+    }
+
+    @Test
+    fun `createCrmRole with missing contactId should return KO status`() {
+        // Given
+        val roleData = createCrmRoleData(salesforceContactId = null)
+
+        // When
+        val result = adapter.createCrmRole(roleData)
+
+        // Then
+        assertEquals(RecordStepStatus.KO, result.crmStatus)
+        assertEquals("BLM Exception: null", result.crmMessage)
+    }
+
+    @Test
+    fun `createCrmRole with empty response body should return KO status`() {
+        // Given
+        val roleData = createCrmRoleData()
+        
+        every { 
+            crmClient.createRole(any(), any(), any()).execute() 
+        } returns Response.success(null)
+
+        // When
+        val result = adapter.createCrmRole(roleData)
+
+        // Then
+        assertEquals(RecordStepStatus.KO, result.crmStatus)
+        assertEquals("Could not get response body from CRM Contacts Role API: empty body", result.crmMessage)
+    }
+
+    // ==================== TESTS PARAMÉTRÉS POUR updateCrmRole ====================
+
+    @ParameterizedTest
+    @CsvSource(
+        // roleType, startDate, endDate, roleId, expectedStatus
+        "PARTNER, 2024-01-01, 2024-12-31, ROLE_PARTNER_123, OK",
+        "MANAGER, 2024-01-01, null, ROLE_MANAGER_456, OK",
+        "ADMIN, 2024-01-01, 2024-06-30, ROLE_ADMIN_789, OK"
+    )
+    fun `updateCrmRole with successful response should return correct payload`(
+        roleType: String,
+        startDate: String,
+        endDate: String?,
+        roleId: String,
+        expectedStatus: String
+    ) {
+        // Given
+        val roleData = createCrmRoleData(
+            roleType = roleType,
+            startDate = LocalDate.parse(startDate),
+            endDate = endDate?.let { LocalDate.parse(it) },
+            salesforceRoleId = roleId
+        )
+        
+        val rolesResponse = RolesResponse(
+            roleId = roleId,
+            status = "UPDATED"
+        )
+        
+        every { 
+            crmClient.updateRole(
+                correlationId = match { it.contains("role") },
+                contactId = "CONTACT_123",
+                roleId = roleId,
+                roleRequest = match { 
+                    it.roleType == roleType &&
+                    it.startDate == LocalDate.parse(startDate) &&
+                    it.endDate == endDate?.let { LocalDate.parse(it) }
+                }
+            ).execute() 
+        } returns Response.success(rolesResponse)
+
+        // When
+        val result = adapter.updateCrmRole(roleData)
+
+        // Then
+        assertEquals(roleId, result.crmRoleId)
+        assertEquals(RecordStepStatus.valueOf(expectedStatus), result.crmStatus)
+        
+        verify { 
+            crmClient.updateRole(
+                correlationId = any(),
+                contactId = "CONTACT_123",
+                roleId = roleId,
+                roleRequest = any()
+            ).execute() 
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        // contactId, roleId, expectedErrorMessage
+        "null, ROLE_123, BLM Exception: null",
+        "CONTACT_123, null, BLM Exception: null",
+        "null, null, BLM Exception: null"
+    )
+    fun `updateCrmRole with missing required IDs should return KO status`(
+        contactId: String?,
+        roleId: String?,
+        expectedErrorMessage: String
+    ) {
+        // Given
+        val roleData = createCrmRoleData(
+            salesforceContactId = contactId?.takeIf { it != "null" },
+            salesforceRoleId = roleId?.takeIf { it != "null" }
+        )
+
+        // When
+        val result = adapter.updateCrmRole(roleData)
+
+        // Then
+        assertEquals(RecordStepStatus.KO, result.crmStatus)
+        assertEquals(expectedErrorMessage, result.crmMessage)
+    }
+
+    @Test
+    fun `updateCrmRole with empty response body should return KO status`() {
+        // Given
+        val roleData = createCrmRoleData(salesforceRoleId = "EXISTING_ROLE")
+        
+        every { 
+            crmClient.updateRole(any(), any(), any(), any()).execute() 
+        } returns Response.success(null)
+
+        // When
+        val result = adapter.updateCrmRole(roleData)
+
+        // Then
+        assertEquals(RecordStepStatus.KO, result.crmStatus)
+        assertEquals("Could not get response body from CRM Contacts Role API: empty body", result.crmMessage)
+    }
+
+    @Test
+    fun `updateCrmRole with error response should return KO status`() {
+        // Given
+        val roleData = createCrmRoleData(salesforceRoleId = "EXISTING_ROLE")
+        
+        every { 
+            crmClient.updateRole(any(), any(), any(), any()).execute() 
+        } returns Response.error(500, mockErrorResponseBody("Internal server error"))
+
+        // When
+        val result = adapter.updateCrmRole(roleData)
+
+        // Then
+        assertEquals(RecordStepStatus.KO, result.crmStatus)
+        assertEquals("Could not get response from CRM Contacts Role API", result.crmMessage)
+    }
+
+    // ==================== MÉTHODES UTILITAIRES ====================
+
+    private fun createCrmRoleData(
+        roleType: String = "PARTNER",
+        startDate: LocalDate? = LocalDate.of(2024, 1, 1),
+        endDate: LocalDate? = LocalDate.of(2024, 12, 31),
+        salesforceContactId: String? = "CONTACT_123",
+        salesforceRoleId: String? = "ROLE_123"
+    ): CrmRoleData {
+        val crmData = CrmData(
+            contactRole = roleType,
+            startDate = startDate,
+            endDate = endDate,
+            salesforceContactId = salesforceContactId,
+            salesforceRoleId = salesforceRoleId
+        )
+        
+        return CrmRoleData(
+            reconciliationId = ReconciliationId("batch-ref", "row-ref"),
+            batchId = 1L,
+            rowNumber = 1,
+            crmCustomerData = crmData
+        )
+    }
+
+    private fun mockErrorResponseBody(errorContent: String): okhttp3.ResponseBody {
+        return okhttp3.ResponseBody.create(
+            okhttp3.MediaType.parse("application/json"),
+            errorContent
+        )
+    }
+}
