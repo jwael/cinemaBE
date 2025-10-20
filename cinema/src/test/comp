@@ -1,0 +1,152 @@
+@ExtendWith(MockKExtension::class)
+class CrmCustomerProviderAdapterTest {
+
+    private val crmClient: CrmClient = mockk()
+    private val adapter = CrmCustomerProviderAdapter(crmClient)
+
+    @ParameterizedTest
+    @CsvSource(
+        "CONTACT123,,REF001,OK,ROLE001",
+        "CONTACT456,ROLE002,REF002,KO,"
+    )
+    fun `should create CRM role correctly`(
+        contactId: String?,
+        roleId: String?,
+        batchRef: String,
+        expectedStatus: String,
+        expectedRoleId: String?
+    ) {
+        // GIVEN
+        val crmRoleData = CrmRoleData(
+            crmCustomerData = CrmData(
+                salesforceContactId = contactId,
+                salesforceRoleId = roleId,
+                reconciliationId = ReconciliationId(
+                    batchReference = ReferenceId(batchRef),
+                    rowReference = ReferenceId("ROW001")
+                ),
+                rowNumber = 1
+            )
+        )
+
+        val rolesResponse = RolesResponse(
+            roles = if (expectedStatus == "OK") listOf(
+                Role(status = expectedStatus, roleId = expectedRoleId)
+            ) else emptyList()
+        )
+
+        val mockResponse = mockk<Response<RolesResponse>>()
+        every { mockResponse.isSuccessful } returns true
+        every { mockResponse.body() } returns rolesResponse
+
+        every {
+            crmClient.createRole(
+                correlationId = any(),
+                contactid = any(),
+                roleRequest = any()
+            )
+        } returns mockResponse
+
+        // WHEN
+        val result = adapter.createCrmRole(crmRoleData)
+
+        // THEN
+        if (expectedStatus == "OK") {
+            assertThat(result.crmStatus).isEqualTo(RecordStepStatus.OK)
+            assertThat(result.crmRoleId).isEqualTo(expectedRoleId)
+        } else {
+            assertThat(result.crmStatus).isEqualTo(RecordStepStatus.KO)
+            assertThat(result.crmRoleId).isNull()
+        }
+
+        verify { crmClient.createRole(any(), any(), any()) }
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        "CONTACT123,ROLE001,REF001,OK,ROLE001",
+        "CONTACT456,ROLE002,REF002,KO,"
+    )
+    fun `should update CRM role correctly`(
+        contactId: String?,
+        roleId: String?,
+        batchRef: String,
+        expectedStatus: String,
+        expectedRoleId: String?
+    ) {
+        // GIVEN
+        val crmRoleData = CrmRoleData(
+            crmCustomerData = CrmData(
+                salesforceContactId = contactId,
+                salesforceRoleId = roleId,
+                reconciliationId = ReconciliationId(
+                    batchReference = ReferenceId(batchRef),
+                    rowReference = ReferenceId("ROW002")
+                ),
+                rowNumber = 2
+            )
+        )
+
+        val rolesResponse = RolesResponse(
+            roles = if (expectedStatus == "OK") listOf(
+                Role(status = expectedStatus, roleId = expectedRoleId)
+            ) else emptyList()
+        )
+
+        val mockResponse = mockk<Response<RolesResponse>>()
+        every { mockResponse.isSuccessful } returns true
+        every { mockResponse.body() } returns rolesResponse
+
+        every {
+            crmClient.updateRole(
+                correlationId = any(),
+                contactId = any(),
+                roleId = any(),
+                roleRequest = any()
+            )
+        } returns mockResponse
+
+        // WHEN
+        val result = adapter.updateCrmRole(crmRoleData)
+
+        // THEN
+        if (expectedStatus == "OK") {
+            assertThat(result.crmStatus).isEqualTo(RecordStepStatus.OK)
+            assertThat(result.crmRoleId).isEqualTo(expectedRoleId)
+        } else {
+            assertThat(result.crmStatus).isEqualTo(RecordStepStatus.KO)
+            assertThat(result.crmRoleId).isNull()
+        }
+
+        verify { crmClient.updateRole(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `should handle failure on create role`() {
+        // GIVEN
+        val crmRoleData = CrmRoleData(
+            crmCustomerData = CrmData(
+                salesforceContactId = "CONTACT_FAIL",
+                reconciliationId = ReconciliationId(batchReference = ReferenceId("REF_FAIL")),
+                rowNumber = 3
+            )
+        )
+
+        val mockResponse = mockk<Response<RolesResponse>>()
+        every { mockResponse.isSuccessful } returns false
+        every { mockResponse.errorBody()?.charStream()?.readText() } returns "API error"
+
+        every {
+            crmClient.createRole(any(), any(), any())
+        } returns mockResponse
+
+        // WHEN
+        val result = adapter.createCrmRole(crmRoleData)
+
+        // THEN
+        assertThat(result.crmStatus).isEqualTo(RecordStepStatus.KO)
+        assertThat(result.crmMessage).contains("API error")
+    }
+
+    // Pareil pour update failure
+}
